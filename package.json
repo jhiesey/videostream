@@ -1,0 +1,24 @@
+{
+  "name": "videostream",
+  "version": "1.0.0",
+  "description": "Video streaming demo",
+  "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/jhiesey/videostream.git"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "browserify index.js > built.js",
+    "start": "http-server ."
+  },
+  "author": "John Hiesey",
+  "license": "MIT",
+  "dependencies": {
+    "browserify": "^9.0.3",
+    "http-server": "^0.7.5",
+    "inherits": "^2.0.1",
+    "mp4box": "git://github.com/jhiesey/mp4box.js.git#nodified",
+    "webtorrent": "^0.29.3"
+  }
+}
