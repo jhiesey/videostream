@@ -1,5 +1,11 @@
 var MP4Box = require('mp4box');
 
+/**
+ * Stream data from `file` into `video`.
+ * `file` must be an object with a `length` property giving the file size in bytes,
+ * and a `createReadStream(opts)` method that retunr a string and accepts opts.start
+ * and opts.end to specify a byte range (inclusive) to fetch.
+ */
 module.exports = function (file, video) {
 	video.addEventListener('waiting', function () {
 		if (ready) {
@@ -21,7 +27,7 @@ module.exports = function (file, video) {
 	var ready = false;
 	var tracks = {}; // keyed by track id
 	mp4box.onReady = function (info) {
-		console.log('mp4 info:', info);
+		console.log('MP4 info:', info);
 		info.tracks.forEach(function (track) {
 			var mime = 'video/mp4; codecs="' + track.codec + '"';
 			if (MediaSource.isTypeSupported(mime)) {
@@ -110,7 +116,8 @@ module.exports = function (file, video) {
 			track.buffer.appendBuffer(buffer.buffer);
 			track.ended = buffer.ended;
 		} catch (e) {
-			console.error('error: ', e);
+			console.error('SourceBuffer error: ', e);
+			// TODO: what to do? for now try again later (if buffer space was the issue)
 			track.arrayBuffers.unshift(buffer);
 		}
 		updateEnded();
@@ -130,5 +137,4 @@ module.exports = function (file, video) {
 			mediaSource.endOfStream();
 		}
 	}
-
 };
