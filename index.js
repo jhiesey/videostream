@@ -66,8 +66,8 @@ mp4box.onReady = function (info) {
 	});
 	ready = true;
 };
+
 mp4box.onSegment = function (id, user, buffer, nextSample) {
-	console.log('got segment; nextSample:', nextSample);
 	var track = tracks[id];
 	appendBuffer(track, buffer, nextSample === track.meta.nb_samples);
 };
@@ -84,12 +84,8 @@ function makeRequest () {
 		start: requestOffset,
 		end: Math.min(file.length - 1, requestOffset + 100000)
 	};
-	console.log('request opts:', opts);
-	var stream = file.createReadStream(opts); //, function (err, stream) {
-	// if (err) return console.error(err);
+	var stream = file.createReadStream(opts);
 	stream.on('data', function (data) {
-		console.log('data, length: ', data.length);
-		// console.log(data.toString('hex'));
 		if (desiredIngestOffset !== requestOffset) {
 			console.warn('moving');
 		}
@@ -99,7 +95,6 @@ function makeRequest () {
 		desiredIngestOffset = mp4box.appendBuffer(arrayBuffer);
 	});
 	stream.on('end', function () {
-		console.log('end');
 		downloadBusy = false;
 		if (requestOffset === file.length) {
 			mp4box.flush();
