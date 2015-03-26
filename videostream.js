@@ -15,15 +15,13 @@ module.exports = function (file, video) {
 
 	var mp4box = new MP4Box();
 	mp4box.onError = function (e) {
-		console.error('MP4Box error:');
-		console.error(e);
+		console.error('MP4Box error:', e);
+		mediaSource.endOfStream('decode');
 	};
 	var ready = false;
-	var tracks = {}; // keyed by id
+	var tracks = {}; // keyed by track id
 	mp4box.onReady = function (info) {
-		console.log('Info:');
-		console.log(info);
-
+		console.log('mp4 info:', info);
 		info.tracks.forEach(function (track) {
 			var mime = 'video/mp4; codecs="' + track.codec + '"';
 			if (MediaSource.isTypeSupported(mime)) {
@@ -68,9 +66,6 @@ module.exports = function (file, video) {
 		};
 		var stream = file.createReadStream(opts);
 		stream.on('data', function (data) {
-			if (desiredIngestOffset !== requestOffset) {
-				console.warn('moving');
-			}
 			var arrayBuffer = data.toArrayBuffer(); // TODO: avoid copy
 			arrayBuffer.fileStart = requestOffset;
 			requestOffset += arrayBuffer.byteLength;
@@ -85,16 +80,17 @@ module.exports = function (file, video) {
 				makeRequest();
 			}
 		});
-		// });
+		stream.on('error', function (err) {
+			console.error('Stream error:', err);
+			mediaSource.endOfStream('network');
+		});
 	}
-
-	// downloader: specify desired offset, get data events with offsets
 
 	function seek (seconds) {
 		var seekResult = mp4box.seek(seconds, true);
-		console.log('seeking to: ', seconds, ' result: ', seekResult);
+		console.log('Seeking to time: ', seconds);
 		desiredIngestOffset = seekResult.offset;
-		console.log('seeked offset:', desiredIngestOffset);
+		console.log('Seeked file offset:', desiredIngestOffset);
 		makeRequest();
 	}
 
@@ -114,7 +110,7 @@ module.exports = function (file, video) {
 			track.buffer.appendBuffer(buffer.buffer);
 			track.ended = buffer.ended;
 		} catch (e) {
-			console.warn('error: ', e);
+			console.error('error: ', e);
 			track.arrayBuffers.unshift(buffer);
 		}
 		updateEnded();
@@ -131,7 +127,6 @@ module.exports = function (file, video) {
 		});
 
 		if (ended) {
-			console.warn('ended');
 			mediaSource.endOfStream();
 		}
 	}
