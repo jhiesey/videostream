@@ -2,7 +2,7 @@
   "name": "videostream",
   "version": "1.0.0",
   "description": "Video streaming demo",
-  "main": "index.js",
+  "main": "videostream.js",
   "repository": {
     "type": "git",
     "url": "git://github.com/jhiesey/videostream.git"
