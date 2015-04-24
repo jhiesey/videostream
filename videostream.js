@@ -6,7 +6,13 @@ var MP4Box = require('mp4box');
  * and a `createReadStream(opts)` method that retunr a string and accepts opts.start
  * and opts.end to specify a byte range (inclusive) to fetch.
  */
-module.exports = function (file, video) {
+module.exports = function (file, video, opts) {
+	if (!opts) opts = {}
+
+	// Autoplay the video when the "autoplay" option is true, or if the "autoplay" property
+	// is set on the `video` tag.
+	if (opts.autoplay == null && video.autoplay) opts.autoplay = true;
+
 	video.addEventListener('waiting', function () {
 		if (ready) {
 			seek(video.currentTime);
@@ -109,6 +115,8 @@ module.exports = function (file, video) {
 	}
 
 	function popBuffers (track) {
+		track.started = true;
+
 		updateEnded(); // set call endOfStream() if needed
 		if (track.buffer.updating || track.arrayBuffers.length === 0) return;
 		var buffer = track.arrayBuffers.shift();
@@ -121,6 +129,8 @@ module.exports = function (file, video) {
 			track.arrayBuffers.unshift(buffer);
 		}
 		updateEnded();
+
+		tryAutoplay();
 	}
 
 	function updateEnded () {
@@ -136,5 +146,17 @@ module.exports = function (file, video) {
 		if (ended) {
 			mediaSource.endOfStream();
 		}
+	}
+
+	function tryAutoplay () {
+		if (!opts.autoplay) return;
+
+		for (var id in tracks) {
+			var track = tracks[id];
+			if (!track.started) return;
+		}
+
+		video.play();
+		opts.autoplay = false;
 	}
 };
