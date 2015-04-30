@@ -7,6 +7,9 @@ var MP4Box = require('mp4box');
  * and opts.end to specify a byte range (inclusive) to fetch.
  */
 module.exports = function (file, video) {
+	debugBuffers = [];
+	debugId = 2;
+
 	video.addEventListener('waiting', function () {
 		if (ready) {
 			seek(video.currentTime);
@@ -32,6 +35,11 @@ module.exports = function (file, video) {
 			var mime = 'video/mp4; codecs="' + track.codec + '"';
 			if (MediaSource.isTypeSupported(mime)) {
 				var sourceBuffer = mediaSource.addSourceBuffer(mime);
+				window.sbs = window.sbs || [];
+				window.sbs.push({
+					mime: mime,
+					buffer: sourceBuffer
+				});
 				var trackEntry = {
 					buffer: sourceBuffer,
 					arrayBuffers: [],
@@ -42,20 +50,35 @@ module.exports = function (file, video) {
 				mp4box.setSegmentOptions(track.id, null, {
 					nbSamples: 500
 				});
-				tracks[track.id] = trackEntry
+				console.log(track.id);
+				tracks[track.id] = trackEntry;
 			}
 		});
 
 		var initSegs = mp4box.initializeSegmentation();
 		initSegs.forEach(function (initSegment) {
-			appendBuffer(tracks[initSegment.id], initSegment.buffer);
+			if (initSegment.id === debugId) {
+				debugBuffers.push(initSegment.buffer);
+			} //else {
+				appendBuffer(tracks[initSegment.id], initSegment.buffer);
+			// }
 		});
 		ready = true;
 	};
 
 	mp4box.onSegment = function (id, user, buffer, nextSample) {
 		var track = tracks[id];
-		appendBuffer(track, buffer, nextSample === track.meta.nb_samples);
+		if (id === debugId) {
+			debugBuffers.push(buffer);
+			console.log(nextSample);
+			if (nextSample === 1558) { //track.meta.nb_samples) {
+				// save('debug-track-' + id + '.mp4', debugBuffers);
+				// debugBuffers = [];
+			}
+		} //else {
+			// console.log('video', nextSample);
+			appendBuffer(track, buffer, false); //nextSample === track.meta.nb_samples);
+		// }
 	};
 
 	var desiredIngestOffset = 0;
@@ -93,11 +116,14 @@ module.exports = function (file, video) {
 	}
 
 	function seek (seconds) {
-		var seekResult = mp4box.seek(seconds, true);
-		console.log('Seeking to time: ', seconds);
-		desiredIngestOffset = seekResult.offset;
-		console.log('Seeked file offset:', desiredIngestOffset);
-		makeRequest();
+		// debugBuffers.forEach(function (buffer) {
+		// 	appendBuffer(tracks[debugId], buffer, false);
+		// });
+		// var seekResult = mp4box.seek(seconds, true);
+		// console.log('Seeking to time: ', seconds);
+		// desiredIngestOffset = seekResult.offset;
+		// console.log('Seeked file offset:', desiredIngestOffset);
+		// makeRequest();
 	}
 
 	function appendBuffer (track, buffer, ended) {
@@ -138,3 +164,19 @@ module.exports = function (file, video) {
 		}
 	}
 };
+
+/**
+  Saves an array of ArrayBuffers to the given filename.
+  @param {string} filename Filename to save as.
+  @param {Array.<ArrayBufferBuffer>}
+  */
+function save (filename, buffers) {
+  var blob = new Blob(buffers);
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.setAttribute('href', url);
+  a.setAttribute('download', filename);
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
