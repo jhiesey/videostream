@@ -5,10 +5,15 @@ var MP4Box = require('mp4box');
  * `file` must be an object with a `length` property giving the file size in bytes,
  * and a `createReadStream(opts)` method that retunr a string and accepts opts.start
  * and opts.end to specify a byte range (inclusive) to fetch.
+ * @param {File} file described above
+ * @param {HTMLVideoElement} video
+ * @param {Object} opts Options
+ * @param {number=} opts.debugTrack Track to save for debugging. Defaults to -1 (none)
  */
-module.exports = function (file, video) {
+module.exports = function (file, video, opts) {
+	opts = opts || {};
+	debugTrack = opts.debugTrack || -1;
 	debugBuffers = [];
-	debugId = 2;
 
 	video.addEventListener('waiting', function () {
 		if (ready) {
@@ -35,11 +40,6 @@ module.exports = function (file, video) {
 			var mime = 'video/mp4; codecs="' + track.codec + '"';
 			if (MediaSource.isTypeSupported(mime)) {
 				var sourceBuffer = mediaSource.addSourceBuffer(mime);
-				window.sbs = window.sbs || [];
-				window.sbs.push({
-					mime: mime,
-					buffer: sourceBuffer
-				});
 				var trackEntry = {
 					buffer: sourceBuffer,
 					arrayBuffers: [],
@@ -50,35 +50,32 @@ module.exports = function (file, video) {
 				mp4box.setSegmentOptions(track.id, null, {
 					nbSamples: 500
 				});
-				console.log(track.id);
 				tracks[track.id] = trackEntry;
 			}
 		});
 
 		var initSegs = mp4box.initializeSegmentation();
 		initSegs.forEach(function (initSegment) {
-			if (initSegment.id === debugId) {
+			if (initSegment.id === debugTrack) {
 				debugBuffers.push(initSegment.buffer);
-			} //else {
-				appendBuffer(tracks[initSegment.id], initSegment.buffer);
-			// }
+			}
+			appendBuffer(tracks[initSegment.id], initSegment.buffer);
 		});
 		ready = true;
 	};
 
 	mp4box.onSegment = function (id, user, buffer, nextSample) {
 		var track = tracks[id];
-		if (id === debugId) {
+		if (id === debugTrack) {
 			debugBuffers.push(buffer);
-			console.log(nextSample);
-			if (nextSample === 1558) { //track.meta.nb_samples) {
-				// save('debug-track-' + id + '.mp4', debugBuffers);
-				// debugBuffers = [];
+			// TODO: this condition is wrong for fragmented files
+			if (nextSample === track.meta.nb_samples) {
+				save('debug-track-' + id + '.mp4', debugBuffers);
+				debugBuffers = [];
 			}
-		} //else {
-			// console.log('video', nextSample);
-			appendBuffer(track, buffer, false); //nextSample === track.meta.nb_samples);
-		// }
+		}
+		// TODO: this condition is wrong for fragmented files
+		appendBuffer(track, buffer, nextSample === track.meta.nb_samples);
 	};
 
 	var desiredIngestOffset = 0;
@@ -116,14 +113,11 @@ module.exports = function (file, video) {
 	}
 
 	function seek (seconds) {
-		// debugBuffers.forEach(function (buffer) {
-		// 	appendBuffer(tracks[debugId], buffer, false);
-		// });
-		// var seekResult = mp4box.seek(seconds, true);
-		// console.log('Seeking to time: ', seconds);
-		// desiredIngestOffset = seekResult.offset;
-		// console.log('Seeked file offset:', desiredIngestOffset);
-		// makeRequest();
+		var seekResult = mp4box.seek(seconds, true);
+		console.log('Seeking to time: ', seconds);
+		desiredIngestOffset = seekResult.offset;
+		console.log('Seeked file offset:', desiredIngestOffset);
+		makeRequest();
 	}
 
 	function appendBuffer (track, buffer, ended) {
