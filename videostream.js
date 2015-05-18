@@ -79,7 +79,7 @@ module.exports = function (file, video) {
 		requestOffset = pos;
 		var opts = {
 			start: requestOffset,
-			end: Math.min(file.length - 1, requestOffset + 1000000)
+			end: file.length - 1
 		};
 		var currStream = stream = file.createReadStream(opts);
 		function onData (data) {
