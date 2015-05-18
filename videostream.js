@@ -15,7 +15,7 @@ module.exports = function (file, video) {
 
 	var mediaSource = new MediaSource();
 	mediaSource.addEventListener('sourceopen', function () {
-		makeRequest();
+		makeRequest(0);
 	});
 	video.src = window.URL.createObjectURL(mediaSource);
 
@@ -58,46 +58,62 @@ module.exports = function (file, video) {
 		appendBuffer(track, buffer, nextSample === track.meta.nb_samples);
 	};
 
-	var desiredIngestOffset = 0;
-	var downloadBusy = false;
-	function makeRequest () {
-		if (downloadBusy) {
+	var requestOffset; // Position in the file where `stream` will next provide data
+	var stream = null;
+	var detachStream;
+	function makeRequest (pos) {
+		if (pos === file.length) {
+			mp4box.flush(); // All done!
 			return;
 		}
-		downloadBusy = true;
-		var requestOffset = desiredIngestOffset;
+
+		if (stream && pos === requestOffset) {
+			return; // There is already a stream at the right position, so just let it continue
+		}
+
+		if (stream) {
+			detachStream();
+			stream.destroy(); // There is a stream, but not at the right position
+		}
+
+		requestOffset = pos;
 		var opts = {
 			start: requestOffset,
-			end: Math.min(file.length - 1, requestOffset + 100000)
+			end: Math.min(file.length - 1, requestOffset + 1000000)
 		};
-		var stream = file.createReadStream(opts);
-		stream.on('data', function (data) {
+		var currStream = stream = file.createReadStream(opts);
+		function onData (data) {
 			var arrayBuffer = data.toArrayBuffer(); // TODO: avoid copy
 			arrayBuffer.fileStart = requestOffset;
 			requestOffset += arrayBuffer.byteLength;
-			desiredIngestOffset = mp4box.appendBuffer(arrayBuffer);
-		});
-		stream.on('end', function () {
-			downloadBusy = false;
-			if (requestOffset === file.length) {
-				mp4box.flush();
-			}
-			if (desiredIngestOffset !== file.length) {
-				makeRequest();
-			}
-		});
-		stream.on('error', function (err) {
+			var nextOffset = mp4box.appendBuffer(arrayBuffer);
+			makeRequest(nextOffset);
+		}
+		currStream.on('data', onData);
+		function onEnd () {
+			detachStream();
+			stream = null;
+			makeRequest(requestOffset);
+		}
+		currStream.on('end', onEnd);
+		function onError (err) {
 			console.error('Stream error:', err);
 			mediaSource.endOfStream('network');
-		});
+		}
+		currStream.on('error', onError);
+
+		detachStream = function () {
+			currStream.removeListener('data', onData);
+			currStream.removeListener('end', onEnd);
+			currStream.removeListener('error', onError);
+		}
 	}
 
 	function seek (seconds) {
 		var seekResult = mp4box.seek(seconds, true);
 		console.log('Seeking to time: ', seconds);
-		desiredIngestOffset = seekResult.offset;
-		console.log('Seeked file offset:', desiredIngestOffset);
-		makeRequest();
+		console.log('Seeked file offset:', seekResult.offset);
+		makeRequest(seekResult.offset);
 	}
 
 	function appendBuffer (track, buffer, ended) {
