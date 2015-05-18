@@ -12,8 +12,10 @@ client.add({
 }, function (torrent) {
 	// Got torrent metadata!
 	console.log('Torrent info hash:', torrent.infoHash);
-	// Let's say the first file is a webm (vp8) or mp4 (h264) video...
-	videostream(torrent.files[0], document.querySelector('video'));
+	// Let's say the first file is a mp4 (h264) video...
+	videostream(torrent.files[0], document.querySelector('video'), {
+		debugTrack: 1
+	});
 	var v = document.querySelector('video');
 	v.play();
 });

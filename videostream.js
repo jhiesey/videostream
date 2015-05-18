@@ -12,8 +12,13 @@ var MP4Box = require('mp4box');
  */
 module.exports = function (file, video, opts) {
 	opts = opts || {};
-	debugTrack = opts.debugTrack || -1;
+	debugTrack = -1; //opts.debugTrack || -1;
 	debugBuffers = [];
+
+	video.addEventListener('error', function (event) {
+		console.error(event);
+		console.error(video.error);
+	});
 
 	video.addEventListener('waiting', function () {
 		if (ready) {
@@ -38,7 +43,7 @@ module.exports = function (file, video, opts) {
 		console.log('MP4 info:', info);
 		info.tracks.forEach(function (track) {
 			var mime = 'video/mp4; codecs="' + track.codec + '"';
-			if (MediaSource.isTypeSupported(mime)) {
+			if (MediaSource.isTypeSupported(mime)) { //} && mime.indexOf('avc1') !== -1) {
 				var sourceBuffer = mediaSource.addSourceBuffer(mime);
 				var trackEntry = {
 					buffer: sourceBuffer,
@@ -47,6 +52,7 @@ module.exports = function (file, video, opts) {
 					ended: false
 				};
 				sourceBuffer.addEventListener('updateend', popBuffers.bind(null, trackEntry));
+				sourceBuffer.addEventListener('error', console.log.bind(console));
 				mp4box.setSegmentOptions(track.id, null, {
 					nbSamples: 500
 				});
@@ -58,6 +64,7 @@ module.exports = function (file, video, opts) {
 		initSegs.forEach(function (initSegment) {
 			if (initSegment.id === debugTrack) {
 				debugBuffers.push(initSegment.buffer);
+				save('init-track-' + debugTrack + '.mp4', debugBuffers);
 			}
 			appendBuffer(tracks[initSegment.id], initSegment.buffer);
 		});
@@ -79,18 +86,20 @@ module.exports = function (file, video, opts) {
 	};
 
 	var desiredIngestOffset = 0;
-	var downloadBusy = false;
+	var stream = null;
+	// var downloadBusy = false;
 	function makeRequest () {
-		if (downloadBusy) {
+		if (stream) {
 			return;
 		}
-		downloadBusy = true;
+		// downloadBusy = true;
 		var requestOffset = desiredIngestOffset;
 		var opts = {
 			start: requestOffset,
 			end: Math.min(file.length - 1, requestOffset + 100000)
 		};
-		var stream = file.createReadStream(opts);
+		stream = file.createReadStream(opts);
+		console.log('createReadStream', opts);
 		stream.on('data', function (data) {
 			var arrayBuffer = data.toArrayBuffer(); // TODO: avoid copy
 			arrayBuffer.fileStart = requestOffset;
@@ -98,7 +107,9 @@ module.exports = function (file, video, opts) {
 			desiredIngestOffset = mp4box.appendBuffer(arrayBuffer);
 		});
 		stream.on('end', function () {
-			downloadBusy = false;
+			console.log('stream ending');
+			stream = null;
+			// downloadBusy = false;
 			if (requestOffset === file.length) {
 				mp4box.flush();
 			}
@@ -117,6 +128,10 @@ module.exports = function (file, video, opts) {
 		console.log('Seeking to time: ', seconds);
 		desiredIngestOffset = seekResult.offset;
 		console.log('Seeked file offset:', desiredIngestOffset);
+		if (stream) {
+			stream.destroy();
+			stream = null;
+		}
 		makeRequest();
 	}
 
