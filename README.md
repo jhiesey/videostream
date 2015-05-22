@@ -34,17 +34,6 @@ var video = document.createElement('video');
 videostream(exampleFile, video);
 ```
 
-/**
- * Stream data from `file` into `video`.
- * `file` must be an object with a `length` property giving the file size in bytes,
- * and a `createReadStream(opts)` method that retunr a string and accepts opts.start
- * and opts.end to specify a byte range (inclusive) to fetch.
- * @param {File} file described above
- * @param {HTMLVideoElement} video
- * @param {Object} opts Options
- * @param {number=} opts.debugTrack Track to save for debugging. Defaults to -1 (none)
- */
-
 ## License
 
 MIT. Copyright (c) John Hiesey.
