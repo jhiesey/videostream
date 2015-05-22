@@ -16,9 +16,4 @@ client.add({
 	videostream(torrent.files[0], document.querySelector('video'));
 	var v = document.querySelector('video');
 	v.play();
-	// window.setTimeout(function () {
-	// 	if (v.readyState === 1) {
-	// 		v.play();
-	// 	}
-	// }, 1000);
 });

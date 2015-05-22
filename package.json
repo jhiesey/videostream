@@ -9,7 +9,7 @@
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "browserify index.js > built.js",
+    "build": "browserify demo.js > built.js",
     "start": "http-server ."
   },
   "author": "John Hiesey",
