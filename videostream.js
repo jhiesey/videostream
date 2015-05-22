@@ -1,5 +1,9 @@
 var MP4Box = require('mp4box');
 
+var HIGH_WATER_MARK = 10000000; // 1MB
+var LOW_WATER_MARK = 1000000; // 100kB
+var APPEND_RETRY_TIME = 5; // seconds
+
 /**
  * Stream data from `file` into `video`.
  * `file` must be an object with a `length` property giving the file size in bytes,
@@ -12,7 +16,7 @@ var MP4Box = require('mp4box');
  */
 module.exports = function (file, video, opts) {
 	opts = opts || {};
-	var debugTrack = opts.debugTrack || 1;
+	var debugTrack = opts.debugTrack || -1;
 	video.addEventListener('waiting', function () {
 		if (ready) {
 			seek(video.currentTime);
@@ -31,6 +35,7 @@ module.exports = function (file, video, opts) {
 		mediaSource.endOfStream('decode');
 	};
 	var ready = false;
+	var totalWaitingBytes = 0;
 	var tracks = {}; // keyed by track id
 	mp4box.onReady = function (info) {
 		console.log('MP4 info:', info);
@@ -46,7 +51,7 @@ module.exports = function (file, video, opts) {
 				};
 				sourceBuffer.addEventListener('updateend', popBuffers.bind(null, trackEntry));
 				mp4box.setSegmentOptions(track.id, null, {
-					nbSamples: 500
+					nbSamples: 1 // It really isn't that inefficient to give the data to the browser on every frame
 				});
 				tracks[track.id] = trackEntry
 			}
@@ -93,31 +98,42 @@ module.exports = function (file, video, opts) {
 			start: requestOffset,
 			end: file.length - 1
 		};
-		var currStream = stream = file.createReadStream(opts);
+		// There is necessarily only one stream that is not detached/destroyed at one time,
+		// so it's safe to overwrite the var from the outer scope
+		stream = file.createReadStream(opts);
 		function onData (data) {
+			// Pause the stream and resume it on the next run of the event loop to avoid
+			// lots of 'data' event blocking the UI
+			stream.pause();
+			// Only resume if there isn't too much data that mp4box has processed that hasn't
+			// gone to the browser
+			if (totalWaitingBytes <= HIGH_WATER_MARK) {
+				resumeStream();
+			}
+
 			var arrayBuffer = data.toArrayBuffer(); // TODO: avoid copy
 			arrayBuffer.fileStart = requestOffset;
 			requestOffset += arrayBuffer.byteLength;
 			var nextOffset = mp4box.appendBuffer(arrayBuffer);
 			makeRequest(nextOffset);
 		}
-		currStream.on('data', onData);
+		stream.on('data', onData);
 		function onEnd () {
 			detachStream();
 			stream = null;
 			makeRequest(requestOffset);
 		}
-		currStream.on('end', onEnd);
+		stream.on('end', onEnd);
 		function onError (err) {
 			console.error('Stream error:', err);
 			mediaSource.endOfStream('network');
 		}
-		currStream.on('error', onError);
+		stream.on('error', onError);
 
 		detachStream = function () {
-			currStream.removeListener('data', onData);
-			currStream.removeListener('end', onEnd);
-			currStream.removeListener('error', onError);
+			stream.removeListener('data', onData);
+			stream.removeListener('end', onEnd);
+			stream.removeListener('error', onError);
 		}
 	}
 
@@ -126,9 +142,11 @@ module.exports = function (file, video, opts) {
 		console.log('Seeking to time: ', seconds);
 		console.log('Seeked file offset:', seekResult.offset);
 		makeRequest(seekResult.offset);
+		resumeStream();
 	}
 
 	function appendBuffer (track, buffer, ended) {
+		totalWaitingBytes += buffer.byteLength;
 		track.arrayBuffers.push({
 			buffer: buffer,
 			ended: ended || false
@@ -137,18 +155,40 @@ module.exports = function (file, video, opts) {
 	}
 
 	function popBuffers (track) {
-		updateEnded(); // set call endOfStream() if needed
 		if (track.buffer.updating || track.arrayBuffers.length === 0) return;
 		var buffer = track.arrayBuffers.shift();
+		var appended = false;
 		try {
 			track.buffer.appendBuffer(buffer.buffer);
 			track.ended = buffer.ended;
+			appended = true;
 		} catch (e) {
 			console.error('SourceBuffer error: ', e);
-			// TODO: what to do? for now try again later (if buffer space was the issue)
+			// Wait and try again later (assuming buffer space was the issue)
 			track.arrayBuffers.unshift(buffer);
+			setTimeout(function () {
+				popBuffers(track);
+			}, APPEND_RETRY_TIME);
 		}
-		updateEnded();
+		if (appended) {
+			totalWaitingBytes -= buffer.buffer.byteLength;
+			if (totalWaitingBytes <= LOW_WATER_MARK) {
+				resumeStream();
+			}
+			updateEnded(); // call mediaSource.endOfStream() if needed
+		}
+	}
+
+	function resumeStream () {
+		// Always wait till the next run of the event loop to cause async break
+		setTimeout(function () {
+			if (stream) {
+				// TODO: remove stream._readableState.flowing once stream.isPaused is available
+				if (stream.isPaused ? stream.isPaused() : !stream._readableState.flowing) {
+					stream.resume();
+				}
+			}
+		});
 	}
 
 	function updateEnded () {
@@ -166,3 +206,17 @@ module.exports = function (file, video, opts) {
 		}
 	}
 };
+
+/**
+  Saves an array of ArrayBuffers to the given filename.
+  @param {string} filename Filename to save as.
+  @param {Array.<ArrayBuffer>}
+  */
+function save (filename, buffers) {
+	var blob = new Blob(buffers);
+	var url = URL.createObjectURL(blob);
+	var a = document.createElement('a');
+	a.setAttribute('href', url);
+	a.setAttribute('download', filename);
+	a.click();
+ }
