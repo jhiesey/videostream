@@ -5,8 +5,14 @@ var MP4Box = require('mp4box');
  * `file` must be an object with a `length` property giving the file size in bytes,
  * and a `createReadStream(opts)` method that retunr a string and accepts opts.start
  * and opts.end to specify a byte range (inclusive) to fetch.
+ * @param {File} file described above
+ * @param {HTMLVideoElement} video
+ * @param {Object} opts Options
+ * @param {number=} opts.debugTrack Track to save for debugging. Defaults to -1 (none)
  */
-module.exports = function (file, video) {
+module.exports = function (file, video, opts) {
+	opts = opts || {};
+	var debugTrack = opts.debugTrack || 1;
 	video.addEventListener('waiting', function () {
 		if (ready) {
 			seek(video.currentTime);
@@ -49,6 +55,9 @@ module.exports = function (file, video) {
 		var initSegs = mp4box.initializeSegmentation();
 		initSegs.forEach(function (initSegment) {
 			appendBuffer(tracks[initSegment.id], initSegment.buffer);
+			if (initSegment.id === debugTrack) {
+				save('init-track-' + debugTrack + '.mp4', [initSegment.buffer]);
+			}
 		});
 		ready = true;
 	};
@@ -56,6 +65,9 @@ module.exports = function (file, video) {
 	mp4box.onSegment = function (id, user, buffer, nextSample) {
 		var track = tracks[id];
 		appendBuffer(track, buffer, nextSample === track.meta.nb_samples);
+		if (id === debugTrack) {
+			save('buffer-' + debugTrack + '.mp4', [buffer]);
+		}
 	};
 
 	var requestOffset; // Position in the file where `stream` will next provide data
