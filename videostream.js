@@ -122,7 +122,17 @@ module.exports = function (file, mediaElem, opts) {
 			var arrayBuffer = data.toArrayBuffer(); // TODO: avoid copy
 			arrayBuffer.fileStart = requestOffset;
 			requestOffset += arrayBuffer.byteLength;
-			var nextOffset = mp4box.appendBuffer(arrayBuffer);
+			var nextOffset;
+			try {
+				// MP4Box tends to blow up ungracefully when it can't parse the mp4 input, so
+				// use a try/catch
+				nextOffset = mp4box.appendBuffer(arrayBuffer);
+			} catch (err) {
+				console.error('MP4Box threw exception:', err);
+				// This will fire the 'error' event on the audio/video element
+				mediaSource.endOfStream('decode');
+				return;
+			}
 			makeRequest(nextOffset);
 		}
 		stream.on('data', onData);
@@ -132,16 +142,16 @@ module.exports = function (file, mediaElem, opts) {
 			makeRequest(requestOffset);
 		}
 		stream.on('end', onEnd);
-		function onError (err) {
+		function onStreamError (err) {
 			console.error('Stream error:', err);
 			mediaSource.endOfStream('network');
 		}
-		stream.on('error', onError);
+		stream.on('error', onStreamError);
 
 		detachStream = function () {
 			stream.removeListener('data', onData);
 			stream.removeListener('end', onEnd);
-			stream.removeListener('error', onError);
+			stream.removeListener('error', onStreamError);
 		}
 	}
 
