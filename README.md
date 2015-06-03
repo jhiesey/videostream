@@ -1,7 +1,7 @@
 # Videostream
 
-Streams data from a file-like seekable object into a &lt;video&gt; node.
-Seeking the video will request a different byte range from the incoming
+Streams data from a file-like seekable object into a &lt;video&gt; or &lt;audio&gt; node (a `HTMLMediaElement`).
+Seeking the media element will request a different byte range from the incoming
 file-like object.
 
 For now only mp4 files are supported. The goal is to support

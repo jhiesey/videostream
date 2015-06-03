@@ -5,21 +5,21 @@ var LOW_WATER_MARK = 1000000; // 100kB
 var APPEND_RETRY_TIME = 5; // seconds
 
 /**
- * Stream data from `file` into `video`.
+ * Stream data from `file` into `mediaElem`.
  * `file` must be an object with a `length` property giving the file size in bytes,
  * and a `createReadStream(opts)` method that retunr a string and accepts opts.start
  * and opts.end to specify a byte range (inclusive) to fetch.
  * @param {File} file described above
- * @param {HTMLVideoElement} video
+ * @param {HTMLMediaElement} mediaElem <audio> or <video> element
  * @param {Object} opts Options
  * @param {number=} opts.debugTrack Track to save for debugging. Defaults to -1 (none)
  */
-module.exports = function (file, video, opts) {
+module.exports = function (file, mediaElem, opts) {
 	opts = opts || {};
 	var debugTrack = opts.debugTrack || -1;
-	video.addEventListener('waiting', function () {
+	mediaElem.addEventListener('waiting', function () {
 		if (ready) {
-			seek(video.currentTime);
+			seek(mediaElem.currentTime);
 		}
 	});
 
@@ -27,7 +27,7 @@ module.exports = function (file, video, opts) {
 	mediaSource.addEventListener('sourceopen', function () {
 		makeRequest(0);
 	});
-	video.src = window.URL.createObjectURL(mediaSource);
+	mediaElem.src = window.URL.createObjectURL(mediaSource);
 
 	var mp4box = new MP4Box();
 	mp4box.onError = function (e) {
@@ -40,7 +40,15 @@ module.exports = function (file, video, opts) {
 	mp4box.onReady = function (info) {
 		console.log('MP4 info:', info);
 		info.tracks.forEach(function (track) {
-			var mime = 'video/mp4; codecs="' + track.codec + '"';
+			var mime;
+			if (track.video) {
+				mime = 'video/mp4';
+			} else if (track.audio) {
+				mime = 'audio/mp4';
+			} else {
+				return;
+			}
+			mime += '; codecs="' + track.codec + '"';
 			if (MediaSource.isTypeSupported(mime)) {
 				var sourceBuffer = mediaSource.addSourceBuffer(mime);
 				var trackEntry = {
