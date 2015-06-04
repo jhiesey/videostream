@@ -139,10 +139,10 @@ module.exports = function (file, mediaElem, opts) {
 				// MP4Box tends to blow up ungracefully when it can't parse the mp4 input, so
 				// use a try/catch
 				nextOffset = mp4box.appendBuffer(arrayBuffer);
-				// Prevent infinte loops if mp4box keeps requesting the same data
-				if (nextOffset === arrayBuffer.fileStart) {
-					throw new Error('MP4Box parsing stuck at offset: ' + nextOffset);
-				}
+				// // Prevent infinte loops if mp4box keeps requesting the same data
+				// if (nextOffset === arrayBuffer.fileStart) {
+				// 	throw new Error('MP4Box parsing stuck at offset: ' + nextOffset);
+				// }
 			} catch (err) {
 				console.error('MP4Box threw exception:', err);
 				// This will fire the 'error' event on the audio/video element
