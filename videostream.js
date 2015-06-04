@@ -65,7 +65,8 @@ module.exports = function (file, mediaElem, opts) {
 				};
 				sourceBuffer.addEventListener('updateend', popBuffers.bind(null, trackEntry));
 				mp4box.setSegmentOptions(track.id, null, {
-					nbSamples: 1 // It really isn't that inefficient to give the data to the browser on every frame
+					// It really isn't that inefficient to give the data to the browser on every frame (for video)
+					nbSamples: track.video ? 1 : 100
 				});
 				tracks[track.id] = trackEntry
 			}
