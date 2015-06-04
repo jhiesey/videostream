@@ -17,6 +17,7 @@ var APPEND_RETRY_TIME = 5; // seconds
 module.exports = function (file, mediaElem, opts) {
 	opts = opts || {};
 	var debugTrack = opts.debugTrack || -1;
+	var debugBuffers = [];
 	mediaElem.addEventListener('waiting', function () {
 		if (ready) {
 			seek(mediaElem.currentTime);
@@ -32,7 +33,12 @@ module.exports = function (file, mediaElem, opts) {
 	var mp4box = new MP4Box();
 	mp4box.onError = function (e) {
 		console.error('MP4Box error:', e);
-		mediaSource.endOfStream('decode');
+		if(detachStream) {
+			detachStream();
+		}
+		if (mediaSource.readyState === 'open') {
+			mediaSource.endOfStream('decode');
+		}
 	};
 	var ready = false;
 	var totalWaitingBytes = 0;
@@ -70,6 +76,7 @@ module.exports = function (file, mediaElem, opts) {
 			appendBuffer(tracks[initSegment.id], initSegment.buffer);
 			if (initSegment.id === debugTrack) {
 				save('init-track-' + debugTrack + '.mp4', [initSegment.buffer]);
+				debugBuffers.push(initSegment.buffer);
 			}
 		});
 		ready = true;
@@ -78,14 +85,18 @@ module.exports = function (file, mediaElem, opts) {
 	mp4box.onSegment = function (id, user, buffer, nextSample) {
 		var track = tracks[id];
 		appendBuffer(track, buffer, nextSample === track.meta.nb_samples);
-		if (id === debugTrack) {
-			save('buffer-' + debugTrack + '.mp4', [buffer]);
+		if (id === debugTrack && debugBuffers) {
+			debugBuffers.push(buffer);
+			if (nextSample > 1000) {
+				save('track-' + debugTrack + '.mp4', debugBuffers);
+				debugBuffers = null;
+			}
 		}
 	};
 
 	var requestOffset; // Position in the file where `stream` will next provide data
 	var stream = null;
-	var detachStream;
+	var detachStream = null;
 	function makeRequest (pos) {
 		if (pos === file.length) {
 			mp4box.flush(); // All done!
@@ -97,8 +108,8 @@ module.exports = function (file, mediaElem, opts) {
 		}
 
 		if (stream) {
-			detachStream();
 			stream.destroy(); // There is a stream, but not at the right position
+			detachStream();
 		}
 
 		requestOffset = pos;
@@ -127,10 +138,18 @@ module.exports = function (file, mediaElem, opts) {
 				// MP4Box tends to blow up ungracefully when it can't parse the mp4 input, so
 				// use a try/catch
 				nextOffset = mp4box.appendBuffer(arrayBuffer);
+				// Prevent infinte loops if mp4box keeps requesting the same data
+				if (nextOffset === arrayBuffer.fileStart) {
+					throw new Error('MP4Box parsing stuck at offset: ' + nextOffset);
+				}
 			} catch (err) {
 				console.error('MP4Box threw exception:', err);
 				// This will fire the 'error' event on the audio/video element
-				mediaSource.endOfStream('decode');
+				if (mediaSource.readyState === 'open') {
+					mediaSource.endOfStream('decode');
+				}
+				stream.destroy();
+				detachStream();
 				return;
 			}
 			makeRequest(nextOffset);
@@ -138,13 +157,14 @@ module.exports = function (file, mediaElem, opts) {
 		stream.on('data', onData);
 		function onEnd () {
 			detachStream();
-			stream = null;
 			makeRequest(requestOffset);
 		}
 		stream.on('end', onEnd);
 		function onStreamError (err) {
 			console.error('Stream error:', err);
-			mediaSource.endOfStream('network');
+			if (mediaSource.readyState === 'open') {
+				mediaSource.endOfStream('network');
+			}
 		}
 		stream.on('error', onStreamError);
 
@@ -152,6 +172,8 @@ module.exports = function (file, mediaElem, opts) {
 			stream.removeListener('data', onData);
 			stream.removeListener('end', onEnd);
 			stream.removeListener('error', onStreamError);
+			stream = null;
+			detachStream = null;
 		}
 	}
 
@@ -219,7 +241,7 @@ module.exports = function (file, mediaElem, opts) {
 			return track.ended && !track.buffer.updating;
 		});
 
-		if (ended) {
+		if (ended && mediaSource.readyState === 'open') {
 			mediaSource.endOfStream();
 		}
 	}
