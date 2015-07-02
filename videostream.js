@@ -2,7 +2,7 @@ var MP4Box = require('mp4box');
 
 var HIGH_WATER_MARK = 10000000; // 1MB
 var LOW_WATER_MARK = 1000000; // 100kB
-var APPEND_RETRY_TIME = 5; // seconds
+var APPEND_RETRY_TIME = 5000; // seconds
 
 /**
  * Stream data from `file` into `mediaElem`.
