@@ -8,7 +8,7 @@
     "url": "git://github.com/jhiesey/videostream.git"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "echo \"Error: no test specified\" && exit 0",
     "build": "browserify demo.js > built.js",
     "start": "http-server ."
   },
