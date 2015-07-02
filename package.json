@@ -19,6 +19,7 @@
   },
   "devDependencies": {
     "browserify": "^9.0.3",
-    "http-server": "^0.8.0"
+    "http-server": "^0.8.0",
+    "webtorrent": "^0.50.2"
   }
 }
