@@ -1,3 +1,4 @@
+var debug = require('debug')();
 var MP4Box = require('mp4box');
 
 var HIGH_WATER_MARK = 10000000; // 1MB
@@ -31,8 +32,8 @@ module.exports = function (file, mediaElem, opts) {
 	mediaElem.src = window.URL.createObjectURL(mediaSource);
 
 	var mp4box = new MP4Box();
-	mp4box.onError = function (e) {
-		console.error('MP4Box error:', e);
+	mp4box.onError = function (err) {
+		debug('MP4Box error: %s', err.message);
 		if(detachStream) {
 			detachStream();
 		}
@@ -44,7 +45,7 @@ module.exports = function (file, mediaElem, opts) {
 	var totalWaitingBytes = 0;
 	var tracks = {}; // keyed by track id
 	mp4box.onReady = function (info) {
-		console.log('MP4 info:', info);
+		debug('MP4 info: %o', info);
 		info.tracks.forEach(function (track) {
 			var mime;
 			if (track.video) {
@@ -149,7 +150,7 @@ module.exports = function (file, mediaElem, opts) {
 				// 	throw new Error('MP4Box parsing stuck at offset: ' + nextOffset);
 				// }
 			} catch (err) {
-				console.error('MP4Box threw exception:', err);
+				debug('MP4Box threw exception: %s', err.message);
 				// This will fire the 'error' event on the audio/video element
 				if (mediaSource.readyState === 'open') {
 					mediaSource.endOfStream('decode');
@@ -167,7 +168,7 @@ module.exports = function (file, mediaElem, opts) {
 		}
 		stream.on('end', onEnd);
 		function onStreamError (err) {
-			console.error('Stream error:', err);
+			debug('Stream error: %s', err.message);
 			if (mediaSource.readyState === 'open') {
 				mediaSource.endOfStream('network');
 			}
@@ -185,8 +186,8 @@ module.exports = function (file, mediaElem, opts) {
 
 	function seek (seconds) {
 		var seekResult = mp4box.seek(seconds, true);
-		console.log('Seeking to time: ', seconds);
-		console.log('Seeked file offset:', seekResult.offset);
+		debug('Seeking to time: %d', seconds);
+		debug('Seeked file offset: %d', seekResult.offset);
 		makeRequest(seekResult.offset);
 		resumeStream();
 	}
@@ -208,8 +209,8 @@ module.exports = function (file, mediaElem, opts) {
 			track.buffer.appendBuffer(buffer.buffer);
 			track.ended = buffer.ended;
 			appended = true;
-		} catch (e) {
-			console.error('SourceBuffer error: ', e);
+		} catch (err) {
+			debug('SourceBuffer error: %s', err.message);
 			// Wait and try again later (assuming buffer space was the issue)
 			track.arrayBuffers.unshift(buffer);
 			setTimeout(function () {
