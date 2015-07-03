@@ -72,6 +72,11 @@ module.exports = function (file, mediaElem, opts) {
 			}
 		});
 
+		if (Object.keys(tracks).length === 0) {
+			mediaSource.endOfStream('decode');
+			return;
+		}
+
 		var initSegs = mp4box.initializeSegmentation();
 		initSegs.forEach(function (initSegment) {
 			appendBuffer(tracks[initSegment.id], initSegment.buffer);
