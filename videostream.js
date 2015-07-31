@@ -18,14 +18,21 @@ module.exports = function (file, mediaElem, opts) {
 	opts = opts || {};
 	var debugTrack = opts.debugTrack || -1;
 	var debugBuffers = [];
-	mediaElem.addEventListener('waiting', function () {
-		if (ready) {
-			seek(mediaElem.currentTime);
-		}
-	});
 
-	// TODO: cleanup/destroy
-	mediaElem.addEventListener('timeupdate', checkUnblock);
+	function init () {
+		mediaElem.addEventListener('waiting', onWaiting);
+		mediaElem.addEventListener('timeupdate', onTimeUpdate);
+	}
+	init();
+
+	var destroyed = false;
+	function destroy (reason) {
+		destroyed = true;
+		mediaElem.removeEventListener('waiting', onWaiting);
+		mediaElem.removeEventListener('timeupdate', onTimeUpdate);
+		if (mediaSource.readyState === 'open')
+			mediaSource.endOfStream(reason);
+	}
 
 	// Determine if it is a good idea to append to the SourceBuffer for the
 	// given track, based on how full the browser's buffer is. Returns
@@ -74,7 +81,7 @@ module.exports = function (file, mediaElem, opts) {
 			detachStream();
 		}
 		if (mediaSource.readyState === 'open') {
-			mediaSource.endOfStream('decode');
+			destroy('decode');
 		}
 	};
 	var ready = false;
@@ -109,7 +116,7 @@ module.exports = function (file, mediaElem, opts) {
 		});
 
 		if (Object.keys(tracks).length === 0) {
-			mediaSource.endOfStream('decode');
+			destroy('decode');
 			return;
 		}
 
@@ -189,7 +196,7 @@ module.exports = function (file, mediaElem, opts) {
 				debug('MP4Box threw exception: %s', err.message);
 				// This will fire the 'error' event on the audio/video element
 				if (mediaSource.readyState === 'open') {
-					mediaSource.endOfStream('decode');
+					destroy('decode');
 				}
 				stream.destroy();
 				detachStream();
@@ -206,7 +213,7 @@ module.exports = function (file, mediaElem, opts) {
 		function onStreamError (err) {
 			debug('Stream error: %s', err.message);
 			if (mediaSource.readyState === 'open') {
-				mediaSource.endOfStream('network');
+				destroy('network');
 			}
 		}
 		stream.on('error', onStreamError);
@@ -220,7 +227,16 @@ module.exports = function (file, mediaElem, opts) {
 		}
 	}
 
+	function onWaiting () {
+		if (ready) {
+			seek(mediaElem.currentTime);
+		}
+	}
+
 	function seek (seconds) {
+		if (destroyed)
+			init();
+
 		var seekResult = mp4box.seek(seconds, true);
 		debug('Seeking to time: %d', seconds);
 		debug('Seeked file offset: %d', seekResult.offset);
@@ -237,7 +253,7 @@ module.exports = function (file, mediaElem, opts) {
 
 	// Potentially call popBuffers() again. Call this whenever
 	// the buffer may have become less full (i.e. on timeupdate)
-	function checkUnblock () {
+	function onTimeUpdate () {
 		Object.keys(tracks).forEach(function (id) {
 			var track = tracks[id];
 			if (track.blocked) {
@@ -264,7 +280,7 @@ module.exports = function (file, mediaElem, opts) {
 			appended = true;
 		} catch (err) {
 			debug('SourceBuffer error: %s', err.message);
-			mediaSource.endOfStream('decode');
+			destroy('decode');
 			return;
 		}
 		if (appended) {
@@ -282,8 +298,8 @@ module.exports = function (file, mediaElem, opts) {
 			return track.ended && !track.buffer.updating;
 		});
 
-		if (ended && mediaSource.readyState === 'open') {
-			mediaSource.endOfStream();
+		if (ended) {
+			destroy();
 		}
 	}
 };
