@@ -1,9 +1,8 @@
-var debug = require('debug')();
+var debug = require('debug')('videostream');
 var MP4Box = require('mp4box');
 
-var HIGH_WATER_MARK = 10000000; // 1MB
-var LOW_WATER_MARK = 1000000; // 100kB
-var APPEND_RETRY_TIME = 5000; // seconds
+var EPSILON = 0.01; // seconds of "slop" in floating-point time calculations
+var MAX_BUFFER = 60; // seconds of buffer before pausing the incoming stream
 
 /**
  * Stream data from `file` into `mediaElem`.
@@ -25,6 +24,43 @@ module.exports = function (file, mediaElem, opts) {
 		}
 	});
 
+	// TODO: cleanup/destroy
+	mediaElem.addEventListener('timeupdate', checkUnblock);
+
+	// Determine if it is a good idea to append to the SourceBuffer for the
+	// given track, based on how full the browser's buffer is. Returns
+	// true if appending is suggested
+	function shouldAppend (track) {
+		var buffered = track.buffer.buffered;
+		var currentTime = mediaElem.currentTime;
+		var bufferEnd = -1; // end of the buffer
+		// This is a little over complex because some browsers seem to separate the
+		// buffered region into multiple sections with slight gaps.
+		// TODO: figure out why there are gaps in the buffer. This may be due to
+		// timestamp errors in mp4box, or due to browsers not liking the single-frame
+		// segments mp4box generates
+		for (var i = 0; i < buffered.length; i++) {
+			var start = buffered.start(i);
+			var end = buffered.end(i) + EPSILON;
+
+			if (start > currentTime) {
+				// Reached past the joined buffer
+				break;
+			} else if (bufferEnd >= 0 || currentTime <= end) {
+				// Found the start/continuation of the joined buffer
+				bufferEnd = end;
+			}
+		}
+
+		var bufferedTime = bufferEnd - currentTime;
+		if (bufferedTime < 0)
+			bufferedTime = 0;
+
+		debug('Buffer length: %f', bufferedTime);
+
+		return bufferedTime <= MAX_BUFFER;
+	}
+
 	var mediaSource = new MediaSource();
 	mediaSource.addEventListener('sourceopen', function () {
 		makeRequest(0);
@@ -42,7 +78,6 @@ module.exports = function (file, mediaElem, opts) {
 		}
 	};
 	var ready = false;
-	var totalWaitingBytes = 0;
 	var tracks = {}; // keyed by track id
 	mp4box.onReady = function (info) {
 		debug('MP4 info: %o', info);
@@ -111,6 +146,12 @@ module.exports = function (file, mediaElem, opts) {
 		}
 
 		if (stream && pos === requestOffset) {
+			var toResume = stream;
+			// Resume on the next tick
+			setTimeout(function () {
+				if (stream === toResume)
+					stream.resume();
+			});
 			return; // There is already a stream at the right position, so just let it continue
 		}
 
@@ -131,11 +172,6 @@ module.exports = function (file, mediaElem, opts) {
 			// Pause the stream and resume it on the next run of the event loop to avoid
 			// lots of 'data' event blocking the UI
 			stream.pause();
-			// Only resume if there isn't too much data that mp4box has processed that hasn't
-			// gone to the browser
-			if (totalWaitingBytes <= HIGH_WATER_MARK) {
-				resumeStream();
-			}
 
 			var arrayBuffer = data.toArrayBuffer(); // TODO: avoid copy
 			arrayBuffer.fileStart = requestOffset;
@@ -189,11 +225,9 @@ module.exports = function (file, mediaElem, opts) {
 		debug('Seeking to time: %d', seconds);
 		debug('Seeked file offset: %d', seekResult.offset);
 		makeRequest(seekResult.offset);
-		resumeStream();
 	}
 
 	function appendBuffer (track, buffer, ended) {
-		totalWaitingBytes += buffer.byteLength;
 		track.arrayBuffers.push({
 			buffer: buffer,
 			ended: ended || false
@@ -201,8 +235,27 @@ module.exports = function (file, mediaElem, opts) {
 		popBuffers(track);
 	}
 
+	// Potentially call popBuffers() again. Call this whenever
+	// the buffer may have become less full (i.e. on timeupdate)
+	function checkUnblock () {
+		Object.keys(tracks).forEach(function (id) {
+			var track = tracks[id];
+			if (track.blocked) {
+				popBuffers(track);
+			}
+		});
+	}
+
 	function popBuffers (track) {
-		if (track.buffer.updating || track.arrayBuffers.length === 0) return;
+		if (track.buffer.updating)
+			return;
+
+		track.blocked = !shouldAppend(track);
+		if (track.blocked)
+			return;
+
+		if (track.arrayBuffers.length === 0)
+			return;
 		var buffer = track.arrayBuffers.shift();
 		var appended = false;
 		try {
@@ -211,31 +264,12 @@ module.exports = function (file, mediaElem, opts) {
 			appended = true;
 		} catch (err) {
 			debug('SourceBuffer error: %s', err.message);
-			// Wait and try again later (assuming buffer space was the issue)
-			track.arrayBuffers.unshift(buffer);
-			setTimeout(function () {
-				popBuffers(track);
-			}, APPEND_RETRY_TIME);
+			mediaSource.endOfStream('decode');
+			return;
 		}
 		if (appended) {
-			totalWaitingBytes -= buffer.buffer.byteLength;
-			if (totalWaitingBytes <= LOW_WATER_MARK) {
-				resumeStream();
-			}
 			updateEnded(); // call mediaSource.endOfStream() if needed
 		}
-	}
-
-	function resumeStream () {
-		// Always wait till the next run of the event loop to cause async break
-		setTimeout(function () {
-			if (stream) {
-				// TODO: remove stream._readableState.flowing once stream.isPaused is available
-				if (stream.isPaused ? stream.isPaused() : !stream._readableState.flowing) {
-					stream.resume();
-				}
-			}
-		});
 	}
 
 	function updateEnded () {
