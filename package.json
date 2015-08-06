@@ -16,7 +16,7 @@
   "license": "MIT",
   "dependencies": {
     "debug": "^2.2.0",
-    "mp4box": "git://github.com/jhiesey/mp4box.js.git#nodified"
+    "mp4box": "https://github.com/jhiesey/mp4box.js.git#nodified"
   },
   "devDependencies": {
     "browserify": "^9.0.3",
