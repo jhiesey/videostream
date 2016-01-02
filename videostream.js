@@ -180,7 +180,7 @@ module.exports = function (file, mediaElem, opts) {
 			// lots of 'data' event blocking the UI
 			stream.pause();
 
-			var arrayBuffer = data.toArrayBuffer(); // TODO: avoid copy
+			var arrayBuffer = new Buffer(data).buffer; // TODO: avoid copy
 			arrayBuffer.fileStart = requestOffset;
 			requestOffset += arrayBuffer.byteLength;
 			var nextOffset;
