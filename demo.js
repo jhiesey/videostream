@@ -3,8 +3,8 @@ var WebTorrent = require('webtorrent');
 
 // This demo uses WebTorrent (https://github.com/feross/webtorrent)
 var client = new WebTorrent();
-// This hash is for the file at http://mirrorblender.top-ix.org/movies/sintel-1024-surround.mp4
-var infoHash = 'a54c3ee75cb901001e46da2072ed7bfde7a5374e';
+
+var infoHash = '6a9759bffd5c0af65319979fb7832189f4f3c35d';
 
 client.add({
 	infoHash: infoHash,
