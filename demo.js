@@ -1,9 +1,10 @@
 var videostream = require('./videostream');
 var WebTorrent = require('webtorrent');
 
-// This demo uses WebTorrent (https://github.com/feross/webtorrent)
+// This demo uses WebTorrent (https://webtorrent.io)
 var client = new WebTorrent();
 
+// Sintel torrent from webtorrent.io (https://webtorrent.io/torrents/sintel.torrent)
 var infoHash = '6a9759bffd5c0af65319979fb7832189f4f3c35d';
 
 client.add({
