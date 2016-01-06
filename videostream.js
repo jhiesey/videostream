@@ -1,5 +1,5 @@
 var debug = require('debug')('videostream');
-var MP4Box = require('mp4box');
+var MP4Box = require('videostream-mp4box');
 
 var EPSILON = 0.01; // seconds of "slop" in floating-point time calculations
 var MAX_BUFFER = 60; // seconds of buffer before pausing the incoming stream
