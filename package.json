@@ -15,12 +15,17 @@
   "author": "John Hiesey",
   "license": "MIT",
   "dependencies": {
+    "binary-search": "^1.2.0",
     "debug": "^2.2.0",
-    "mp4box": "git://github.com/jhiesey/mp4box.js.git#nodified"
+    "inherits": "^2.0.1",
+    "mediasource": "^1.0.0",
+    "mp4-stream": "^1.0.0",
+    "multistream": "^2.0.2",
+    "pump": "^1.0.1"
   },
   "devDependencies": {
-    "browserify": "^9.0.3",
-    "http-server": "^0.8.0",
-    "webtorrent": "^0.55.0"
+    "browserify": "^13.0.0",
+    "http-server": "^0.8.5",
+    "webtorrent": "^0.72.2"
   }
 }
