@@ -29,7 +29,7 @@ MP4Remuxer.prototype._findMoov = function (offset) {
 	}
 
 	self._decoder = mp4.decode()
-	var fileStream = self._file({
+	var fileStream = self._file.createReadStream({
 		start: offset
 	})
 	fileStream.pipe(self._decoder)
@@ -339,7 +339,7 @@ MP4Remuxer.prototype.seek = function (time, prependInit) {
 	})
 
 	if (startOffset >= 0) {
-		var fileStream = self._fileStream = self._file({
+		var fileStream = self._fileStream = self._file.createReadStream({
 			start: startOffset
 		})
 

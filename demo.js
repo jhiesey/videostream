@@ -26,7 +26,13 @@ var REQUEST_SIZE = 2000000 // 2mb
 
 var http = require('http')
 
-var file = function (opts) {
+var file = function (path) {
+	var self = this
+	self.path = path
+}
+
+file.prototype.createReadStream = function (opts) {
+	var self = this
 	opts = opts || {}
 	var start = opts.start || 0
 	var size = 310674005
@@ -47,9 +53,7 @@ var file = function (opts) {
 		var isBig = (reqEnd - reqStart > 100000)
 
 		req = http.get({
-			path: 'sintel-2048-surround.mp4',
-			// path: '/bbb_sunflower_1080p_30fps_normal.mp4',
-			// path: '/fragmented.mp4',
+			path: self.path,
 			headers: {
 				range: 'bytes=' + reqStart + '-' + (reqEnd - 1)
 			},
@@ -72,5 +76,5 @@ var video = document.querySelector('video')
 video.addEventListener('error', function (err) {
 	console.error(video.error)
 })
-videostream(file, video)
+videostream(new file('sintel-2048-surround.mp4'), video)
 video.play()
