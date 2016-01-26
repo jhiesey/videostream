@@ -34,18 +34,18 @@ file.prototype.createReadStream = function (opts) {
 	var self = this
 	opts = opts || {}
 	var start = opts.start || 0
-	var size = 310674005
-	var end = opts.end ? (opts.end + 1) : size
+	var fileSize = -1
 
 	var req = null
 	var multi = new MultiStream(function (cb) {
+		var end = opts.end ? (opts.end + 1) : fileSize
+
 		var reqStart = start
 		var reqEnd = start + REQUEST_SIZE
 		if (end >= 0 && reqEnd > end) {
 			reqEnd = end
 		}
-		start = reqEnd
-		if (reqStart === reqEnd) {
+		if (reqStart >= reqEnd) {
 			req = null
 			return cb(null, null)
 		}
@@ -57,9 +57,16 @@ file.prototype.createReadStream = function (opts) {
 				range: 'bytes=' + reqStart + '-' + (reqEnd - 1)
 			},
 			mode: isBig ? 'prefer-streaming' : 'prefer-fast'
-		}, function (stream) {
-			cb(null, stream)
+		}, function (res) {
+			var contentRange = res.headers['content-range']
+			if (contentRange) {
+				fileSize = parseInt(contentRange.split('/')[1], 10)
+			}
+			cb(null, res)
 		})
+
+		// For the next request
+		start = reqEnd
 	})
 	var destroy = multi.destroy
 	multi.destroy = function () {
