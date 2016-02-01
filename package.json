@@ -9,8 +9,8 @@
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 0",
-    "build": "browserify demo.js > built.js",
-    "start": "http-server ."
+    "build-example": "browserify example/index.js > example/built.js",
+    "start": "http-server example"
   },
   "author": "John Hiesey",
   "license": "MIT",
@@ -18,14 +18,15 @@
     "binary-search": "^1.2.0",
     "debug": "^2.2.0",
     "inherits": "^2.0.1",
-    "mediasource": "^1.0.0",
+    "mediasource": "^2.0.0",
+    "mp4-box-encoding": "^1.0.0",
     "mp4-stream": "^1.0.0",
     "multistream": "^2.0.2",
-    "pump": "^1.0.1"
+    "pump": "^1.0.1",
+    "range-slice-stream": "^1.0.0"
   },
   "devDependencies": {
     "browserify": "^13.0.0",
-    "http-server": "^0.8.5",
-    "webtorrent": "^0.72.2"
+    "http-server": "^0.8.5"
   }
 }

@@ -5,11 +5,12 @@ Seeking the media element will request a different byte range from the incoming
 file-like object.
 
 For now only mp4 files are supported. The goal is to support
-most files that conform to ISO/IEC 14496-12, but there are definitely
-lots of bugs at this point! It uses a fork of
-[mp4box.js](https://github.com/gpac/mp4box.js/) with a bunch of bug fixes
-to repackage the files; I hope to put many of these fixes back upstream
-soon.
+most files that conform to ISO/IEC 14496-12.
+
+Version 2 is completely rewritten and substantially more robust
+than the previous version that relied on mp4box.js. The only major regression
+compared to the previous architecture is that fragmented mp4 files aren't
+supported. If this is a problem I may add support again at some point.
 
 Support for most other formats will take significant work.
 
@@ -19,7 +20,6 @@ Videostream just exports a function. Use it like this:
 
 ```
 var exampleFile = {
-	length: 100000, // Total size of the file
 	createReadStream: function (opts) {
 		var start = opts.start;
 		var end = opts.end;
@@ -28,7 +28,7 @@ var exampleFile = {
 	}
 }
 
-var videostream = require('./videostream');
+var videostream = require('videostream');
 
 var video = document.createElement('video');
 videostream(exampleFile, video);
