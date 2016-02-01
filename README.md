@@ -18,7 +18,7 @@ Support for most other formats will take significant work.
 
 Videostream just exports a function. Use it like this:
 
-```
+``` js
 var exampleFile = {
 	createReadStream: function (opts) {
 		var start = opts.start;
