@@ -4,13 +4,12 @@ var stream = require('stream')
 
 var videostream = require('../')
 
+// This demo requires sintel.mp4 to be copied into the example directory
 var REQUEST_SIZE = 2000000 // 2mb
-
 var file = function (path) {
 	var self = this
 	self.path = path
 }
-
 file.prototype.createReadStream = function (opts) {
 	var self = this
 	opts = opts || {}
@@ -61,5 +60,27 @@ var video = document.querySelector('video')
 video.addEventListener('error', function (err) {
 	console.error(video.error)
 })
-videostream(new file('sintel-1024-surround.mp4'), video)
+videostream(new file('sintel.mp4'), video)
 video.play()
+
+/*
+var WebTorrent = require('webtorrent');
+
+// This demo uses WebTorrent (https://webtorrent.io)
+var client = new WebTorrent();
+
+// Sintel torrent from webtorrent.io (https://webtorrent.io/torrents/sintel.torrent)
+var infoHash = '6a9759bffd5c0af65319979fb7832189f4f3c35d';
+
+client.add({
+	infoHash: infoHash,
+	announce: 'wss://tracker.webtorrent.io/'
+}, function (torrent) {
+	// Got torrent metadata!
+	console.log('Torrent info hash:', torrent.infoHash);
+	// Let's say the first file is a mp4 (h264) video...
+	videostream(torrent.files[0], document.querySelector('video'));
+	var v = document.querySelector('video');
+	v.play();
+});
+*/
