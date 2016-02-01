@@ -2,8 +2,8 @@ var bs = require('binary-search')
 var EventEmitter = require('events')
 var inherits = require('inherits')
 var mp4 = require('mp4-stream')
-var Box = require('mp4-stream/box')
-var StreamSlicer = require('stream-slicer')
+var Box = require('mp4-box-encoding')
+var RangeSliceStream = require('range-slice-stream')
 
 module.exports = MP4Remuxer
 
@@ -19,8 +19,6 @@ function MP4Remuxer (file) {
 
 inherits(MP4Remuxer, EventEmitter)
 
-// var MAX_SKIP_SIZE = 10000 // 10k
-
 MP4Remuxer.prototype._findMoov = function (offset) {
 	var self = this
 
@@ -34,9 +32,9 @@ MP4Remuxer.prototype._findMoov = function (offset) {
 	})
 	fileStream.pipe(self._decoder)
 
-	self._decoder.once('box', function (headers, resume) {
+	self._decoder.once('box', function (headers) {
 		if (headers.type === 'moov') {
-			resume('decode', function (moov) {
+			self._decoder.decode(function (moov) {
 				fileStream.destroy()
 				self._processMoov(moov)
 			})
@@ -95,7 +93,6 @@ MP4Remuxer.prototype._processMoov = function (moov) {
 			}
 			mime = 'video/mp4; codecs="' + codec + '"'
 		} else if (handlerType === 'soun' && stsdEntry.type === 'mp4a') {
-			// continue
 			if (self._hasAudio) {
 				continue
 			}
@@ -119,7 +116,7 @@ MP4Remuxer.prototype._processMoov = function (moov) {
 		var sampleToChunkIndex = 0
 
 		// Time data
-		var dts = 0 // TODO: edits affect this
+		var dts = 0
 		var decodingTimeEntry = new RunLengthIndex(stbl.stts.entries)
 		var presentationOffsetEntry = null
 		if (stbl.ctts) {
@@ -226,7 +223,7 @@ MP4Remuxer.prototype._processMoov = function (moov) {
 					defaultSampleDescriptionIndex: defaultSampleDescriptionIndex,
 					defaultSampleDuration: 0,
 					defaultSampleSize: 0,
-					defaultSampleFlags: 0 // TODO: this should actually be set correctly
+					defaultSampleFlags: 0
 				}]
 			}
 		}
@@ -261,9 +258,6 @@ MP4Remuxer.prototype._processMoov = function (moov) {
 	})
 
 	self.emit('ready', data)
-
-	// console.log(util.inspect(moov, {showHidden: false, depth: null}))
-	// console.log(util.inspect(self._tracks, {showHidden: false, depth: null}))
 }
 
 function empty () {
@@ -344,7 +338,7 @@ MP4Remuxer.prototype.seek = function (time, prependInit) {
 		})
 
 		self._tracks.forEach(function (track) {
-			track.inStream = new StreamSlicer(startOffset)
+			track.inStream = new RangeSliceStream(startOffset)
 			fileStream.pipe(track.inStream)
 		})
 	}
@@ -353,8 +347,6 @@ MP4Remuxer.prototype.seek = function (time, prependInit) {
 		return track.outStream
 	})
 }
-
-// var fs = require('fs')
 
 MP4Remuxer.prototype._findSampleBefore = function (trackInd, time) {
 	var self = this
@@ -473,4 +465,3 @@ MP4Remuxer.prototype._generateMoof = function (track, firstSample, lastSample) {
 
 	return moof
 }
-

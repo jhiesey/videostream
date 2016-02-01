@@ -1,13 +1,9 @@
-// var debug = require('debug')('videostream');
-
-// var EPSILON = 0.01; // seconds of "slop" in floating-point time calculations
-// var MAX_BUFFER = 60; // seconds of buffer before pausing the incoming stream
-
-var MP4Remuxer = require('./mp4-remuxer')
-var MediaElementWrapper = require('mediasource')
-var pump = require('pump')
 var EventEmitter = require('events')
 var inherits = require('inherits')
+var MediaElementWrapper = require('mediasource')
+var pump = require('pump')
+
+var MP4Remuxer = require('./mp4-remuxer')
 
 module.exports = VideoStream
 
@@ -23,13 +19,12 @@ function VideoStream (file, mediaElem, opts) {
 	self._tracks = null
 
 	self._onWaiting = function () {
-		console.warn('waiting')
 		if (self._tracks) {
 			var muxed = self._muxer.seek(self._elem.currentTime)
 			self._tracks.forEach(function (track, i) {
 				track.muxed.destroy()
 				track.muxed = muxed[i]
-				track.mediaSource = self._elemWrapper.getStream(track.mediaSource)
+				track.mediaSource = self._elemWrapper.createWriteStream(track.mediaSource)
 			})
 			self._pump()
 		}
@@ -41,7 +36,7 @@ function VideoStream (file, mediaElem, opts) {
 		self._tracks = data.map(function (track, i) {
 			return {
 				muxed: muxed[i],
-				mediaSource: self._elemWrapper.getStream(track.mime)
+				mediaSource: self._elemWrapper.createWriteStream(track.mime)
 			}
 		})
 		self._pump()
