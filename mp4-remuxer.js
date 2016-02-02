@@ -239,6 +239,11 @@ MP4Remuxer.prototype._processMoov = function (moov) {
 		})
 	}
 
+	if (self._tracks.length === 0) {
+		self.emit('error', new Error('no playable tracks'))
+		return
+	}
+
 	// Must be set last since this is used above
 	moov.mvhd.duration = 0
 

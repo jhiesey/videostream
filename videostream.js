@@ -18,6 +18,9 @@ function VideoStream (file, mediaElem, opts) {
 	self._muxer = new MP4Remuxer(file)
 	self._tracks = null
 
+	self._onError = function (err) {
+		self.destroy() // don't pass err though so the user doesn't need to listen for errors
+	}
 	self._onWaiting = function () {
 		if (self._tracks) {
 			var muxed = self._muxer.seek(self._elem.currentTime)
@@ -30,6 +33,7 @@ function VideoStream (file, mediaElem, opts) {
 		}
 	}
 	self._elem.addEventListener('waiting', self._onWaiting)
+	self._elem.addEventListener('error', self._onError)
 
 	self._muxer.on('ready', function (data) {
 		var muxed = self._muxer.seek(0, true)
@@ -42,7 +46,9 @@ function VideoStream (file, mediaElem, opts) {
 		self._pump()
 	})
 
-	self._muxer.on('error', self.emit.bind(self, 'error'))
+	self._muxer.on('error', function (err) {
+		self._elemWrapper.error(err)
+	})
 }
 
 inherits(VideoStream, EventEmitter)
@@ -66,6 +72,7 @@ VideoStream.prototype.destroy = function (err) {
 	self.destroyed = true
 
 	self._elem.removeEventListener('waiting', self._onWaiting)
+	self._elem.removeEventListener('error', self._onError)
 
 	if (self._tracks) {
 		self._tracks.forEach(function (track) {
