@@ -1,5 +1,3 @@
-var EventEmitter = require('events')
-var inherits = require('inherits')
 var MediaElementWrapper = require('mediasource')
 var pump = require('pump')
 
@@ -11,7 +9,6 @@ function VideoStream (file, mediaElem, opts) {
 	var self = this
 	if (!(this instanceof VideoStream)) return new VideoStream(file, mediaElem, opts)
 	opts = opts || {}
-	EventEmitter.call(self)
 
 	self._elem = mediaElem
 	self._elemWrapper = new MediaElementWrapper(mediaElem)
@@ -51,20 +48,17 @@ function VideoStream (file, mediaElem, opts) {
 	})
 }
 
-inherits(VideoStream, EventEmitter)
-
 VideoStream.prototype._pump = function () {
 	var self = this
 	self._tracks.forEach(function (track) {
-		pump(track.muxed, track.mediaSource, function (err) {
-			if (err && err.message !== 'premature close') {
-				self.emit('error', err)
-			}
+		track.mediaSource.on('error', function (err) {
+			self._elemWrapper.error(err)
 		})
+		pump(track.muxed, track.mediaSource)
 	})
 }
 
-VideoStream.prototype.destroy = function (err) {
+VideoStream.prototype.destroy = function () {
 	var self = this
 	if (self.destroyed) {
 		return
@@ -81,6 +75,4 @@ VideoStream.prototype.destroy = function (err) {
 	}
 
 	self._elem.src = ''
-
-	if (err) self.emit('error', err)
 }
