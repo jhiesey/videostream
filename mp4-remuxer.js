@@ -71,8 +71,6 @@ MP4Remuxer.prototype._processMoov = function (moov) {
 
 	var traks = moov.traks
 	self._tracks = []
-	var audioCodec = null
-	var videoCodec = null
 	self._hasVideo = false
 	self._hasAudio = false
 	for (var i = 0; i < traks.length; i++) {
@@ -395,12 +393,11 @@ MP4Remuxer.prototype._generateFragment = function (track, time) {
 	if (firstSample >= currTrack.samples.length)
 		return null
 
-	var startOffset = currTrack.samples[firstSample].offset
 	var startDts = currTrack.samples[firstSample].dts
 
 	var totalLen = 0
 	var ranges = []
-	for (var currSample = firstSample; currSample < currTrack.samples.length; currSample++) {	
+	for (var currSample = firstSample; currSample < currTrack.samples.length; currSample++) {
 		var sample = currTrack.samples[currSample]
 		if (sample.sync && sample.dts - startDts >= currTrack.timeScale * MIN_FRAGMENT_DURATION) {
 			break // This is a reasonable place to end the fragment
