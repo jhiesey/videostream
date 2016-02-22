@@ -1,5 +1,5 @@
 var bs = require('binary-search')
-var EventEmitter = require('events')
+var EventEmitter = require('events').EventEmitter
 var inherits = require('inherits')
 var mp4 = require('mp4-stream')
 var Box = require('mp4-box-encoding')
