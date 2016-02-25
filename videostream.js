@@ -12,6 +12,8 @@ function VideoStream (file, mediaElem, opts) {
 
 	self._elem = mediaElem
 	self._elemWrapper = new MediaElementWrapper(mediaElem)
+	self._waitingFired = false
+	self._trackMeta = null
 	self._muxer = new MP4Remuxer(file)
 	self._tracks = null
 
@@ -19,13 +21,8 @@ function VideoStream (file, mediaElem, opts) {
 		self.destroy() // don't pass err though so the user doesn't need to listen for errors
 	}
 	self._onWaiting = function () {
-		if (self._tracks) {
-			var muxed = self._muxer.seek(self._elem.currentTime)
-			self._tracks.forEach(function (track, i) {
-				track.muxed.destroy()
-				track.muxed = muxed[i]
-				track.mediaSource = self._elemWrapper.createWriteStream(track.mediaSource)
-			})
+		self._waitingFired = true
+		if (self._trackMeta) {
 			self._pump()
 		}
 	}
@@ -33,14 +30,10 @@ function VideoStream (file, mediaElem, opts) {
 	self._elem.addEventListener('error', self._onError)
 
 	self._muxer.on('ready', function (data) {
-		var muxed = self._muxer.seek(0, true)
-		self._tracks = data.map(function (track, i) {
-			return {
-				muxed: muxed[i],
-				mediaSource: self._elemWrapper.createWriteStream(track.mime)
-			}
-		})
-		self._pump()
+		self._trackMeta = data
+		if (self._waitingFired) {
+			self._pump()
+		}
 	})
 
 	self._muxer.on('error', function (err) {
@@ -50,11 +43,25 @@ function VideoStream (file, mediaElem, opts) {
 
 VideoStream.prototype._pump = function () {
 	var self = this
-	self._tracks.forEach(function (track) {
+
+	var muxed = self._muxer.seek(self._elem.currentTime, !self._tracks)
+
+	self._tracks = muxed.map(function (muxedStream, i) {
+		var createStreamArg = self._trackMeta[i].mime
+		if (self._tracks) {
+			createStreamArg = self._tracks[i].mediaSource
+			self._tracks[i].muxed.destroy()
+		}
+		var track = {
+			muxed: muxedStream,
+			mediaSource: self._elemWrapper.createWriteStream(createStreamArg)
+		}
+
 		track.mediaSource.on('error', function (err) {
 			self._elemWrapper.error(err)
 		})
 		pump(track.muxed, track.mediaSource)
+		return track
 	})
 }
 
