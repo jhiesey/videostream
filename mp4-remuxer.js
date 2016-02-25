@@ -254,9 +254,12 @@ MP4Remuxer.prototype._processMoov = function (moov) {
 		]
 	}
 
+	var ftypBuf = Box.encode(self._ftyp)
 	var data = self._tracks.map(function (track) {
+		var moovBuf = Box.encode(track.moov)
 		return {
-			mime: track.mime
+			mime: track.mime,
+			init: Buffer.concat([ftypBuf, moovBuf])
 		}
 	})
 
@@ -271,7 +274,7 @@ function empty () {
 	}
 }
 
-MP4Remuxer.prototype.seek = function (time, prependInit) {
+MP4Remuxer.prototype.seek = function (time) {
 	var self = this
 	if (!self._tracks) {
 		throw new Error('Not ready yet; wait for \'ready\' event')
@@ -303,18 +306,7 @@ MP4Remuxer.prototype.seek = function (time, prependInit) {
 			startOffset = fragment.ranges[0].start
 		}
 
-		if (prependInit) {
-			outStream.box(self._ftyp, function (err) {
-				if (err) return self.emit('error', err)
-				if (outStream.destroyed) return
-				outStream.box(track.moov, function (err) {
-					if (err) return self.emit('error', err)
-					writeFragment(fragment)
-				})
-			})
-		} else {
-			writeFragment(fragment)
-		}
+		writeFragment(fragment)
 
 		function writeFragment (frag) {
 			if (outStream.destroyed) return

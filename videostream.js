@@ -14,24 +14,44 @@ function VideoStream (file, mediaElem, opts) {
 	self._elemWrapper = new MediaElementWrapper(mediaElem)
 	self._waitingFired = false
 	self._trackMeta = null
-	self._muxer = new MP4Remuxer(file)
+	self._file = file
 	self._tracks = null
+	if (self._elem.preload !== 'none') {
+		self._createMuxer()
+	}
 
 	self._onError = function (err) {
 		self.destroy() // don't pass err though so the user doesn't need to listen for errors
 	}
 	self._onWaiting = function () {
 		self._waitingFired = true
-		if (self._trackMeta) {
+		if (!self._muxer) {
+			self._createMuxer()
+		} else if (self._tracks) {
 			self._pump()
 		}
 	}
 	self._elem.addEventListener('waiting', self._onWaiting)
 	self._elem.addEventListener('error', self._onError)
+}
 
+VideoStream.prototype._createMuxer = function () {
+	var self = this
+	self._muxer = new MP4Remuxer(self._file)
 	self._muxer.on('ready', function (data) {
-		self._trackMeta = data
-		if (self._waitingFired) {
+		self._tracks = data.map(function (trackData) {
+			var mediaSource = self._elemWrapper.createWriteStream(trackData.mime)
+			mediaSource.on('error', function (err) {
+				self._elemWrapper.error(err)
+			})
+			mediaSource.write(trackData.init)
+			return {
+				muxed: null,
+				mediaSource: mediaSource
+			}
+		})
+
+		if (self._waitingFired || self._elem.preload === 'auto') {
 			self._pump()
 		}
 	})
@@ -46,21 +66,16 @@ VideoStream.prototype._pump = function () {
 
 	var muxed = self._muxer.seek(self._elem.currentTime, !self._tracks)
 
-	self._tracks = muxed.map(function (muxedStream, i) {
-		var createStreamArg = self._trackMeta[i].mime
-		if (self._tracks) {
-			createStreamArg = self._tracks[i].mediaSource
-			self._tracks[i].muxed.destroy()
+	self._tracks.forEach(function (track, i) {
+		if (track.muxed) {
+			track.muxed.destroy()
+			track.mediaSource = self._elemWrapper.createWriteStream(track.mediaSource)
+			track.mediaSource.on('error', function (err) {
+				self._elemWrapper.error(err)
+			})
 		}
-		var mediaSource = self._elemWrapper.createWriteStream(createStreamArg)
-		mediaSource.on('error', function (err) {
-			self._elemWrapper.error(err)
-		})
-		pump(muxedStream, mediaSource)
-		return {
-			muxed: muxedStream,
-			mediaSource: mediaSource
-		}
+		track.muxed = muxed[i]
+		pump(track.muxed, track.mediaSource)
 	})
 }
 

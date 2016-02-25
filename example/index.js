@@ -61,7 +61,6 @@ video.addEventListener('error', function (err) {
 	console.error(video.error)
 })
 videostream(new file('sintel.mp4'), video)
-video.play()
 
 /*
 var WebTorrent = require('webtorrent');
@@ -80,7 +79,5 @@ client.add({
 	console.log('Torrent info hash:', torrent.infoHash);
 	// Let's say the first file is a mp4 (h264) video...
 	videostream(torrent.files[0], document.querySelector('video'));
-	var v = document.querySelector('video');
-	v.play();
 });
 */
