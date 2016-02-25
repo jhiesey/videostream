@@ -36,7 +36,12 @@ MP4Remuxer.prototype._findMoov = function (offset) {
 		if (headers.type === 'moov') {
 			self._decoder.decode(function (moov) {
 				fileStream.destroy()
-				self._processMoov(moov)
+				try {
+					self._processMoov(moov)
+				} catch (err) {
+					err.message = 'Cannot parse mp4 file: ' + err.message
+					self.emit('error', err)
+				}
 			})
 		} else {
 			fileStream.destroy()
