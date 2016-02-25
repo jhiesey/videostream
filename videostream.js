@@ -52,16 +52,15 @@ VideoStream.prototype._pump = function () {
 			createStreamArg = self._tracks[i].mediaSource
 			self._tracks[i].muxed.destroy()
 		}
-		var track = {
-			muxed: muxedStream,
-			mediaSource: self._elemWrapper.createWriteStream(createStreamArg)
-		}
-
-		track.mediaSource.on('error', function (err) {
+		var mediaSource = self._elemWrapper.createWriteStream(createStreamArg)
+		mediaSource.on('error', function (err) {
 			self._elemWrapper.error(err)
 		})
-		pump(track.muxed, track.mediaSource)
-		return track
+		pump(muxedStream, mediaSource)
+		return {
+			muxed: muxedStream,
+			mediaSource: mediaSource
+		}
 	})
 }
 
