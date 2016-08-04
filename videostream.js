@@ -47,11 +47,19 @@ VideoStream.prototype._createMuxer = function () {
 			mediaSource.on('error', function (err) {
 				self._elemWrapper.error(err)
 			})
-			mediaSource.write(trackData.init)
-			return {
+			var track = {
 				muxed: null,
-				mediaSource: mediaSource
+				mediaSource: mediaSource,
+				initFlushed: false,
+				onInitFlushed: null
 			}
+			mediaSource.write(trackData.init, function (err) {
+				track.initFlushed = true
+				if (track.onInitFlushed) {
+					track.onInitFlushed(err)
+				}
+			})
+			return track
 		})
 
 		if (self._waitingFired || self._elem.preload === 'auto') {
@@ -70,15 +78,28 @@ VideoStream.prototype._pump = function () {
 	var muxed = self._muxer.seek(self._elem.currentTime, !self._tracks)
 
 	self._tracks.forEach(function (track, i) {
-		if (track.muxed) {
-			track.muxed.destroy()
-			track.mediaSource = self._elemWrapper.createWriteStream(track.mediaSource)
-			track.mediaSource.on('error', function (err) {
-				self._elemWrapper.error(err)
-			})
+		var pumpTrack = function () {
+			if (track.muxed) {
+				track.muxed.destroy()
+				track.mediaSource = self._elemWrapper.createWriteStream(track.mediaSource)
+				track.mediaSource.on('error', function (err) {
+					self._elemWrapper.error(err)
+				})
+			}
+			track.muxed = muxed[i]
+			pump(track.muxed, track.mediaSource)
 		}
-		track.muxed = muxed[i]
-		pump(track.muxed, track.mediaSource)
+		if (!track.initFlushed) {
+			track.onInitFlushed = function (err) {
+				if (err) {
+					self._elemWrapper.error(err)
+					return
+				}
+				pumpTrack()
+			}
+		} else {
+			pumpTrack()
+		}
 	})
 }
 
