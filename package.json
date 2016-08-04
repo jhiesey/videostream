@@ -1,6 +1,6 @@
 {
   "name": "videostream",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "description": "Video streaming demo",
   "main": "videostream.js",
   "repository": {
