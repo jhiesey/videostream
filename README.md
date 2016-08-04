@@ -28,11 +28,25 @@ var exampleFile = {
 	}
 }
 
-var videostream = require('videostream');
+var VideoStream = require('videostream');
 
-var video = document.createElement('video');
-videostream(exampleFile, video);
+var elem = document.createElement('video');
+var videostream = VideoStream(exampleFile, elem);
+
+elem.addEventListener('error', function () {
+  // listen for errors on the video/audio element directly
+  var errorCode = elem.error
+  var detailedError = videostream.detailedError
+  // videostream.detailedError will often have a more detailed error message
+})
 ```
+
+### Errors
+
+Handle errors by listening to the `'error'` event on the `<video>` or `<audio>` tag.
+
+Some (but not all) errors will also cause `videostream.detailedError` to be set to
+an error value that has a more informative error message.
 
 ## License
 

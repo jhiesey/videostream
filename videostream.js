@@ -10,6 +10,8 @@ function VideoStream (file, mediaElem, opts) {
 	if (!(this instanceof VideoStream)) return new VideoStream(file, mediaElem, opts)
 	opts = opts || {}
 
+	self.detailedError = null
+
 	self._elem = mediaElem
 	self._elemWrapper = new MediaElementWrapper(mediaElem)
 	self._waitingFired = false
@@ -21,6 +23,7 @@ function VideoStream (file, mediaElem, opts) {
 	}
 
 	self._onError = function (err) {
+		self.detailedError = self._elemWrapper.detailedError
 		self.destroy() // don't pass err though so the user doesn't need to listen for errors
 	}
 	self._onWaiting = function () {
