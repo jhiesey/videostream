@@ -290,8 +290,7 @@ MP4Remuxer.prototype.seek = function (time) {
 		self._fileStream = null
 	}
 
-	var startOffset = -1
-	self._tracks.map(function (track, i) {
+	return self._tracks.map(function (track, i) {
 		// find the keyframe before the time
 		// stream from there
 		if (track.outStream) {
@@ -304,12 +303,10 @@ MP4Remuxer.prototype.seek = function (time) {
 		var outStream = track.outStream = mp4.encode()
 		var fragment = self._generateFragment(i, time)
 		if (!fragment) {
-			return outStream.finalize()
+			outStream.finalize()
+			return outStream
 		}
-
-		if (startOffset === -1 || fragment.ranges[0].start < startOffset) {
-			startOffset = fragment.ranges[0].start
-		}
+		var startOffset = fragment.ranges[0].start
 
 		writeFragment(fragment)
 
@@ -330,21 +327,15 @@ MP4Remuxer.prototype.seek = function (time) {
 				}))
 			})
 		}
-	})
 
-	if (startOffset >= 0) {
 		var fileStream = self._fileStream = self._file.createReadStream({
 			start: startOffset
 		})
 
-		self._tracks.forEach(function (track) {
-			track.inStream = new RangeSliceStream(startOffset)
-			fileStream.pipe(track.inStream)
-		})
-	}
+		track.inStream = new RangeSliceStream(startOffset)
+		fileStream.pipe(track.inStream)
 
-	return self._tracks.map(function (track) {
-		return track.outStream
+		return outStream
 	})
 }
 
