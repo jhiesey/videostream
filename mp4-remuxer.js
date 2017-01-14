@@ -338,7 +338,12 @@ MP4Remuxer.prototype.seek = function (time) {
 		})
 
 		self._tracks.forEach(function (track) {
-			track.inStream = new RangeSliceStream(startOffset)
+			track.inStream = new RangeSliceStream(startOffset, {
+				// Allow up to a 10MB offset between audio and video,
+				// which should be fine for any reasonable interleaving
+				// interval and bitrate
+				highWaterMark: 10000000
+			})
 			fileStream.pipe(track.inStream)
 		})
 	}

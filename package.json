@@ -22,7 +22,7 @@
     "mp4-stream": "^2.0.0",
     "multistream": "^2.0.2",
     "pump": "^1.0.1",
-    "range-slice-stream": "^1.0.0"
+    "range-slice-stream": "^1.2.0"
   },
   "devDependencies": {
     "browserify": "^13.0.0",
