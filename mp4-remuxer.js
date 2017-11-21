@@ -4,6 +4,7 @@ var inherits = require('inherits')
 var mp4 = require('mp4-stream')
 var Box = require('mp4-box-encoding')
 var RangeSliceStream = require('range-slice-stream')
+var Buffer = require('buffer').Buffer
 
 module.exports = MP4Remuxer
 
@@ -33,6 +34,9 @@ MP4Remuxer.prototype._findMoov = function (offset) {
 	fileStream.pipe(self._decoder)
 
 	self._decoder.once('box', function (headers) {
+        if (d) {
+            console.debug('box', headers.type, headers.length, headers, offset);
+        }
 		if (headers.type === 'moov') {
 			self._decoder.decode(function (moov) {
 				fileStream.destroy()
@@ -81,6 +85,7 @@ MP4Remuxer.prototype._processMoov = function (moov) {
 	for (var i = 0; i < traks.length; i++) {
 		var trak = traks[i]
 		var stbl = trak.mdia.minf.stbl
+		var stco = stbl.stco || stbl.co64;
 		var stsdEntry = stbl.stsd.entries[0]
 		var handlerType = trak.mdia.hdlr.handlerType
 		var codec
@@ -152,7 +157,7 @@ MP4Remuxer.prototype._processMoov = function (moov) {
 				dts: dts,
 				presentationOffset: presentationOffset,
 				sync: sync,
-				offset: offsetInChunk + stbl.stco.entries[chunk]
+				offset: offsetInChunk + stco.entries[chunk]
 			})
 
 			// Go to next sample
@@ -367,6 +372,7 @@ MP4Remuxer.prototype._findSampleBefore = function (trackInd, time) {
 	} else if (sample < 0) {
 		sample = -sample - 2
 	}
+	if (sample < 1) return 0
 	// sample is now the last sample with dts <= time
 	// Find the preceeding sync sample
 	while (!track.samples[sample].sync) {
@@ -469,3 +475,26 @@ MP4Remuxer.prototype._generateMoof = function (track, firstSample, lastSample) {
 
 	return moof
 }
+
+// Extending mp4-box-encoding boxes support...
+
+var UINT32_MAX = Math.pow(2, 32);
+
+Box.boxes.fullBoxes.co64 = true;
+Box.boxes.co64 = {};
+Box.boxes.co64.decode = function(buf, offset) {
+    buf = buf.slice(offset);
+    var num = buf.readUInt32BE(0);
+    var entries = new Array(num);
+
+    for (var i = 0; i < num; i++) {
+        var pos = i * 8 + 4;
+        var hi = buf.readUInt32BE(pos);
+        var lo = buf.readUInt32BE(pos + 4);
+        entries[i] = (hi * UINT32_MAX) + lo;
+    }
+
+    return {
+        entries: entries
+    }
+};

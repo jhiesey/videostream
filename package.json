@@ -10,6 +10,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 0",
     "build-example": "browserify example/index.js > example/built.js",
+    "browserify": "node ./bundle/build-browserify.js > ./bundle/videostream.js",
+    "rollup": "rollup -c",
     "start": "http-server example"
   },
   "author": "John Hiesey",
@@ -20,12 +22,13 @@
     "mediasource": "^2.0.0",
     "mp4-box-encoding": "^1.1.1",
     "mp4-stream": "^2.0.0",
-    "multistream": "^2.0.2",
-    "pump": "^1.0.1",
-    "range-slice-stream": "^1.2.0"
+    "pump": "^1.0.3",
+    "range-slice-stream": "^1.2.0",
+    "readable-stream": "^2.3.3"
   },
   "devDependencies": {
     "browserify": "^14.0.0",
-    "http-server": "^0.8.5"
+    "http-server": "^0.10.0",
+    "uglify-js": "^3.1.10"
   }
 }
