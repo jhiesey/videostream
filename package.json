@@ -22,13 +22,13 @@
     "mediasource": "^2.0.0",
     "mp4-box-encoding": "^1.1.1",
     "mp4-stream": "^2.0.0",
-    "pump": "^1.0.3",
+    "pump": "^2.0.0",
     "range-slice-stream": "^1.2.0",
     "readable-stream": "^2.3.3"
   },
   "devDependencies": {
     "browserify": "^14.0.0",
     "http-server": "^0.10.0",
-    "uglify-js": "^3.1.10"
+    "uglify-js": "^3.3.2"
   }
 }

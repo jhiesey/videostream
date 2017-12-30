@@ -99,7 +99,7 @@ CacheStream.prototype._destroy = function(err, cb) {
     cb(err);
 };
 
-function VideoFile(data) {
+function VideoFile(data, bgtask) {
     this.data = data;
     this.stream = null;
 
@@ -115,8 +115,10 @@ function VideoFile(data) {
     this.filesize = -1;
 
     this.throttle = 0;
-    this.paused = false;
+    this.paused = true;
     this.playing = false;
+    this.bgtask = bgtask;
+    this.bqtasks = [];
 
     this.minCache = MIN_CACHE;
     this.maxCache = MAX_CACHE;
@@ -364,10 +366,15 @@ VideoFile.prototype.fetch = function fetch(startpos, recycle) {
                     console.warn('stream overquota, holding...', ev);
                 }
 
-                dlmanager.showOverQuotaDialog(function() {
-                    dlmanager.onNolongerOverquota();
-                    retry();
-                });
+                if (self.bgtask) {
+                    self.bqtasks.push(retry);
+                }
+                else {
+                    dlmanager.showOverQuotaDialog(function() {
+                        dlmanager.onNolongerOverquota();
+                        retry();
+                    });
+                }
             }
             else {
                 if (d) {
@@ -397,13 +404,15 @@ VideoFile.prototype.feedPlayer = function() {
  * Start streaming a MEGA file.
  * @param {String} data The data needed by gfsfetch()
  * @param {Object} video The <video> element
+ * @param {Object} [options] Additional options
  * @constructor
  * @preserve
  */
-function Streamer(data, video) {
+function Streamer(data, video, options) {
     if (!(this instanceof Streamer)) {
-        return new Streamer(data, video);
+        return new Streamer(data, video, options);
     }
+    this.options = Object.assign(Object.create(null), {autoplay: true}, options);
 
     this.engine = ua.details.engine;
     this.browser = ua.details.browser;
@@ -422,7 +431,12 @@ function Streamer(data, video) {
     this.video = video;
     this.evs = Object.create(null);
 
-    this.file = new VideoFile(data);
+    this.file = new VideoFile(data, !this.options.autoplay);
+
+    if (this.options.autoplay === false) {
+        this.file.minCache = 0x1000000;
+    }
+
     this.stream = new VideoStream(this.file.fetch(0), video, {bufferDuration: MAX_BUF_SECONDS * 1.8});
     this.file._vs = this.stream;
 }
@@ -505,14 +519,15 @@ Streamer.prototype.handleEvent = function(ev) {
             videoFile.playing = false;
             break;
 
-        case 'canplay':
-            this.play();
-            break;
-
         case 'progress':
             target.removeEventListener('progress', this);
 
-            if (!videoFile.playing) {
+            if (videoFile.playing) {
+                break;
+            }
+        /* fallthrought */
+        case 'canplay':
+            if (this.options.autoplay) {
                 this.play();
             }
             break;
@@ -535,7 +550,7 @@ Streamer.prototype.handleEvent = function(ev) {
     }
 
     if (this.evs[ev.type]) {
-        var a1 = ev.type === 'error' && this.stream.detailedError || false;
+        var a1 = ev.type === 'error' && (this.stream.detailedError || Object(target.error).message) || false;
 
         this.evs[ev.type] = this.evs[ev.type].filter(function(cb) {
             return cb(ev, a1);
@@ -569,6 +584,20 @@ Streamer.prototype.play = function() {
         }
     }
     catch (ex) {
+    }
+
+    if (this.options.autoplay === false) {
+        this.options.autoplay = true;
+        this.file.minCache = MIN_CACHE;
+
+        // FIXME: improve this..
+        if (this.file.bqtasks.length) {
+            for (var i = 0; i < this.file.bqtasks.length; i++) {
+                later(this.file.bqtasks[i]);
+            }
+        }
+        this.file.bqtasks = [];
+        this.file.bgtask = false;
     }
 };
 
