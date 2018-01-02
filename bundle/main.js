@@ -420,9 +420,10 @@ function Streamer(data, video, options) {
     this._events = [
         'progress', 'timeupdate', 'canplay', 'pause', 'playing', 'error', 'abort', 'updateend', 'ended'
     ];
-    if (this.browser !== 'Edge' && video.parentNode && !window.chrome) {
+    if (this.browser !== 'Edge' && video.parentNode) {
         // Edge gets stuck on seeking by listening to..seeking
         this._events.push('seeking');
+        this.WILL_AUTOPLAY_ONSEEK = true;
     }
     for (var i = this._events.length; i--;) {
         video.addEventListener(this._events[i], this, false);
@@ -532,6 +533,10 @@ Streamer.prototype.handleEvent = function(ev) {
             }
             break;
 
+        case 'ended':
+            this.stream.flushSourceBuffers();
+            break;
+
         case 'timeupdate':
             if (videoFile.throttle && videoFile.throttle - target.currentTime < (MAX_BUF_SECONDS / 3)) {
                 if (d) {
@@ -550,7 +555,7 @@ Streamer.prototype.handleEvent = function(ev) {
     }
 
     if (this.evs[ev.type]) {
-        var a1 = ev.type === 'error' && (this.stream.detailedError || Object(target.error).message) || false;
+        var a1 = ev.type === 'error' && (this.stream._elemWrapper.detailedError || Object(target.error).message) || false;
 
         this.evs[ev.type] = this.evs[ev.type].filter(function(cb) {
             return cb(ev, a1);

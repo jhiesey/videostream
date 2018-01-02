@@ -29,6 +29,6 @@
   "devDependencies": {
     "browserify": "^14.0.0",
     "http-server": "^0.10.0",
-    "uglify-js": "^3.3.2"
+    "uglify-js": "^3.3.4"
   }
 }

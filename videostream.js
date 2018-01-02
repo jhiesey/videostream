@@ -3,6 +3,7 @@
 var pump = require('pump');
 var MP4Remuxer = require('./mp4-remuxer');
 var MediaElementWrapper = require('mediasource');
+var toArrayBuffer = require('to-arraybuffer');
 
 module.exports = VideoStream;
 
@@ -82,6 +83,35 @@ VideoStream.prototype.createWriteStream = function(obj) {
     var videoStream = this;
     var mediaSource = videoStream._elemWrapper.createWriteStream(obj);
     var mediaSourceDestroy = mediaSource.destroy;
+
+    mediaSource._write = function(chunk, encoding, cb) {
+        if (!this.destroyed) {
+            var self = this;
+            var sb = this._sourceBuffer;
+
+            if (sb && !sb.updating) {
+                try {
+                    sb.appendBuffer(toArrayBuffer(chunk));
+                    this._cb = cb;
+                    return;
+                }
+                catch (ex) {
+                    if (ex.name !== 'QuotaExceededError') {
+                        return self.destroy(ex);
+                    }
+                    // videoStream.flushSourceBuffers();
+                }
+            }
+
+            // retry later
+            this._cb = function(err) {
+                if (err) {
+                    return cb(err);
+                }
+                self._write(chunk, encoding, cb);
+            };
+        }
+    };
 
     mediaSource.destroy = function(err) {
         try {
@@ -214,11 +244,11 @@ VideoStream.prototype.forEachSourceBuffer = function(cb) {
 VideoStream.prototype.flushSourceBuffers = function() {
     this.forEachSourceBuffer(function(sb, startRange, endRange, currentTime, mediaSource) {
         if (d) {
-            console.debug('seeking ct=%s sr=%s er=%s',
+            console.debug('[VideoStream.flushSourceBuffers] ct=%s sr=%s er=%s',
                 currentTime, startRange, endRange, sb.updating, mediaSource.readyState, sb);
         }
 
-        if (!sb.updating) {
+        if (!sb.updating /*&& mediaSource.readyState === 'ended'*/) {
 
             if (endRange > currentTime) {
                 startRange = Math.max(currentTime + 1, startRange);
@@ -231,7 +261,7 @@ VideoStream.prototype.flushSourceBuffers = function() {
                 sb.remove(startRange, endRange);
 
                 if (d) {
-                    console.log('seeking flushed', startRange, endRange);
+                    console.log('[VideoStream.flushSourceBuffers] remove took place', startRange, endRange);
                 }
             }
         }
