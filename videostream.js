@@ -25,6 +25,11 @@ function VideoStream(file, mediaElem, opts) {
     if (self._elem.preload !== 'none') {
         self._createMuxer()
     }
+    if (!opts.sbflush) {
+        self.flushSourceBuffers = function() {
+            /* noop */
+        };
+    }
 
     self._onError = function(err) {
         self.detailedError = self._elemWrapper.detailedError || err;
@@ -96,10 +101,15 @@ VideoStream.prototype.createWriteStream = function(obj) {
                     return;
                 }
                 catch (ex) {
-                    if (ex.name !== 'QuotaExceededError') {
+                    if (d > 1) {
+                        console.debug('Caught %s', ex.name, ex);
+                    }
+                    if (ex.name === 'QuotaExceededError') {
+                        videoStream.flushSourceBuffers(-1);
+                    }
+                    else if (ex.name !== 'InvalidStateError') {
                         return self.destroy(ex);
                     }
-                    // videoStream.flushSourceBuffers();
                 }
             }
 
@@ -215,7 +225,7 @@ VideoStream.prototype.destroy = function() {
         URL.revokeObjectURL(self._elem.src);
     }
 
-    self._elem.src = '';
+    self._elem.removeAttribute('src');
     self._elem = false;
 };
 
@@ -227,10 +237,10 @@ VideoStream.prototype.forEachSourceBuffer = function(cb) {
             ms = this._tracks[i].mediaSource._mediaSource;
             sb = this._tracks[i].mediaSource._sourceBuffer;
 
-            startRange = sb.buffered.length ? sb.buffered.start(0) : 0;
-            endRange = sb.buffered.length ? sb.buffered.end(sb.buffered.length - 1) : 0;
-
             try {
+                startRange = sb.buffered.length ? sb.buffered.start(0) : 0;
+                endRange = sb.buffered.length ? sb.buffered.end(sb.buffered.length - 1) : 0;
+
                 cb.call(this, sb, startRange, endRange, currentTime, ms);
             }
             catch (ex) {
@@ -241,23 +251,33 @@ VideoStream.prototype.forEachSourceBuffer = function(cb) {
 };
 
 // Flush source buffers when seeking backward or forward
-VideoStream.prototype.flushSourceBuffers = function() {
+VideoStream.prototype.flushSourceBuffers = function(mode) {
     this.forEachSourceBuffer(function(sb, startRange, endRange, currentTime, mediaSource) {
         if (d) {
             console.debug('[VideoStream.flushSourceBuffers] ct=%s sr=%s er=%s',
-                currentTime, startRange, endRange, sb.updating, mediaSource.readyState, sb);
+                currentTime, startRange, endRange, sb.updating, mediaSource.readyState, mode, sb);
         }
 
         if (!sb.updating /*&& mediaSource.readyState === 'ended'*/) {
 
-            if (endRange > currentTime) {
-                startRange = Math.max(currentTime + 1, startRange);
+            if (mode !== -1) {
+                if (endRange > currentTime) {
+                    startRange = Math.max(currentTime + 1, startRange);
+                }
+                else if (currentTime >= startRange && currentTime <= endRange) {
+                    endRange = currentTime - 1;
+                }
             }
-            else if (currentTime >= startRange && currentTime <= endRange) {
-                endRange = currentTime - 1;
+            else {
+                if (endRange >= currentTime) {
+                    endRange = Math.floor(currentTime);
+                }
+                if (startRange >= currentTime) {
+                    return;
+                }
             }
 
-            if (endRange > startRange) {
+            if (endRange > startRange && (endRange - startRange) > 1) {
                 sb.remove(startRange, endRange);
 
                 if (d) {
