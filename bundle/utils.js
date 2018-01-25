@@ -12,7 +12,7 @@ if (typeof requestIdleCallback !== 'undefined') {
 
 var utils = {
     debuglog: function(name) {
-        if (d > 2) {
+        if (d > 8) {
             var logger = MegaLogger.getLogger(name);
 
             return logger.debug.bind(logger);

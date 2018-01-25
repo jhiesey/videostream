@@ -96,6 +96,15 @@ VideoStream.prototype.createWriteStream = function(obj) {
 
             if (sb && !sb.updating) {
                 try {
+                    if (d > 6) {
+                        if (!sb._mimeType) {
+                            sb._mimeType = mediaSource._type;
+
+                            sb.addEventListener('abort', console.warn.bind(console));
+                            sb.addEventListener('error', console.warn.bind(console));
+                        }
+                        console.warn('Appending buffer to media source ' + sb._mimeType, chunk, sb, this._mediaSource.readyState);
+                    }
                     sb.appendBuffer(toArrayBuffer(chunk));
                     this._cb = cb;
                     return;
@@ -107,7 +116,7 @@ VideoStream.prototype.createWriteStream = function(obj) {
                     if (ex.name === 'QuotaExceededError') {
                         videoStream.flushSourceBuffers(-1);
                     }
-                    else if (ex.name !== 'InvalidStateError') {
+                    else {
                         return self.destroy(ex);
                     }
                 }

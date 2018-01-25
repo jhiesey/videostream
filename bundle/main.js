@@ -503,6 +503,10 @@ function Streamer(data, video, options) {
     };
     this.stream = new VideoStream(this.file.fetch(0), video, videoStreamOptions);
     this.file._vs = this.stream;
+
+    if (d) {
+        self.strm = this;
+    }
 }
 
 Streamer.prototype = Object.create(null);
@@ -603,6 +607,11 @@ Streamer.prototype.handleEvent = function(ev) {
 
         case 'progress':
             target.removeEventListener('progress', this);
+
+            if (d > 1) {
+                this.stream._elemWrapper._mediaSource.addEventListener('sourceclose', console.warn.bind(console));
+                this.stream._elemWrapper._mediaSource.addEventListener('sourceended', console.warn.bind(console));
+            }
 
             if (videoFile.playing) {
                 break;

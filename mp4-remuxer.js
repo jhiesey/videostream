@@ -90,6 +90,9 @@ MP4Remuxer.prototype._processMoov = function (moov) {
 		var handlerType = trak.mdia.hdlr.handlerType
 		var codec
 		var mime
+        if (d) {
+            console.debug('handler=%s, type=%s, trak:', handlerType, stsdEntry.type, trak);
+        }
 		if (handlerType === 'vide' && stsdEntry.type === 'avc1') {
 			if (self._hasVideo) {
 				continue
@@ -100,16 +103,26 @@ MP4Remuxer.prototype._processMoov = function (moov) {
 				codec += '.' + stsdEntry.avcC.mimeCodec
 			}
 			mime = 'video/mp4; codecs="' + codec + '"'
+            if (d) {
+                console.debug(mime);
+            }
 		} else if (handlerType === 'soun' && stsdEntry.type === 'mp4a') {
 			if (self._hasAudio) {
 				continue
 			}
-			self._hasAudio = true
 			codec = 'mp4a'
 			if (stsdEntry.esds && stsdEntry.esds.mimeCodec) {
 				codec += '.' + stsdEntry.esds.mimeCodec
 			}
 			mime = 'audio/mp4; codecs="' + codec + '"'
+            if (d) {
+                console.debug(mime);
+            }
+            if (!MediaSource.isTypeSupported(mime)) {
+                // Let's continue without audio if actually unsupported, e.g. mp4a.6B (MP3)
+                continue;
+            }
+            self._hasAudio = true
 		} else {
 			continue
 		}
@@ -284,6 +297,48 @@ function empty () {
 	}
 }
 
+MP4Remuxer.prototype._writeFragment = function(fragment, i) {
+    var self = this;
+    var track = self._tracks[i];
+    var inStream = track.inStream;
+    var outStream = track.outStream;
+
+    var wrap = function(cb) {
+        return function(err) {
+            if (err) {
+                self.emit('error', err)
+            }
+            else if (outStream.destroyed || inStream.destroyed) {
+                if (d > 1) {
+                    console.debug('writeFragment stream destroyed', outStream.destroyed, inStream.destroyed);
+                }
+            }
+            else {
+                cb();
+            }
+        };
+    };
+
+    var parser = wrap(function() {
+        fragment = self._generateFragment(i);
+        if (!fragment) {
+            return outStream.finalize()
+        }
+        writeFragment();
+    });
+    var boxer = wrap(function() {
+        var slicedStream = inStream.slice(fragment.ranges);
+        var mediaDataStream = outStream.mediaData(fragment.length, parser);
+        slicedStream.pipe(mediaDataStream);
+    });
+    var writeFragment = function() {
+        if (!outStream.destroyed) {
+            outStream.box(fragment.moof, boxer);
+        }
+    };
+    writeFragment();
+};
+
 MP4Remuxer.prototype.seek = function (time) {
 	var self = this
 	if (!self._tracks) {
@@ -295,8 +350,15 @@ MP4Remuxer.prototype.seek = function (time) {
 		self._fileStream = null
 	}
 
-	var startOffset = -1
-	self._tracks.map(function (track, i) {
+    var startOffset = Math.pow(2, 53);
+    self._tracks.forEach(function(track, i) {
+        track.fragment = self._generateFragment(i, time);
+        if (track.fragment) {
+            startOffset = Math.min(startOffset, track.fragment.ranges[0].start);
+        }
+    });
+
+    return self._tracks.map(function(track, i) {
 		// find the keyframe before the time
 		// stream from there
 		if (track.outStream) {
@@ -306,57 +368,32 @@ MP4Remuxer.prototype.seek = function (time) {
 			track.inStream.destroy()
 			track.inStream = null
 		}
-		var outStream = track.outStream = mp4.encode()
-		var fragment = self._generateFragment(i, time)
-		if (!fragment) {
-			return outStream.finalize()
-		}
+        track.outStream = mp4.encode();
+        if (!track.fragment) {
+            track.outStream.finalize();
+        }
+        else {
+            if (d) {
+                console.debug('MP4Remuxer.seek(%s)', time, track, startOffset);
+            }
 
-		if (startOffset === -1 || fragment.ranges[0].start < startOffset) {
-			startOffset = fragment.ranges[0].start
-		}
+            track.inStream = new RangeSliceStream(startOffset, {
+                // Allow up to a 10MB offset between audio and video,
+                // which should be fine for any reasonable interleaving
+                // interval and bitrate
+                highWaterMark: 10000000
+            });
 
-		writeFragment(fragment)
+            if (!self._fileStream) {
+                self._fileStream = self._file.createReadStream({start: startOffset});
+            }
+            self._fileStream.pipe(track.inStream);
+            self._writeFragment(track.fragment, i);
+        }
 
-		function writeFragment (frag) {
-			if (outStream.destroyed) return
-			outStream.box(frag.moof, function (err) {
-				if (err) return self.emit('error', err)
-				if (outStream.destroyed) return
-				var slicedStream = track.inStream.slice(frag.ranges)
-				slicedStream.pipe(outStream.mediaData(frag.length, function (err) {
-					if (err) return self.emit('error', err)
-					if (outStream.destroyed) return
-					var nextFrag = self._generateFragment(i)
-					if (!nextFrag) {
-						return outStream.finalize()
-					}
-					writeFragment(nextFrag)
-				}))
-			})
-		}
-	})
-
-	if (startOffset >= 0) {
-		var fileStream = self._fileStream = self._file.createReadStream({
-			start: startOffset
-		})
-
-		self._tracks.forEach(function (track) {
-			track.inStream = new RangeSliceStream(startOffset, {
-				// Allow up to a 10MB offset between audio and video,
-				// which should be fine for any reasonable interleaving
-				// interval and bitrate
-				highWaterMark: 10000000
-			})
-			fileStream.pipe(track.inStream)
-		})
-	}
-
-	return self._tracks.map(function (track) {
-		return track.outStream
-	})
-}
+        return track.outStream;
+    });
+};
 
 MP4Remuxer.prototype._findSampleBefore = function (trackInd, time) {
 	var self = this
