@@ -84,6 +84,17 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
 
         // Provide a more meaningful message for unsupported videos
         chunk = chunk.replace("'Data too short'", "'Unsupported media format, data too short...'");
+
+        // let's do some debugging here...
+        chunk = chunk.replace('var obj = {}',
+            'var obj=Object.create(null);if(d>1)console.warn("Box.decode", type, obj);');
+        chunk = chunk.replace('var flags',
+            '$&;if(d>1)console.warn("Box.readHeaders", [buffer], start, end,' +
+            ' type, containers[type], boxes[type], boxes.fullBoxes[type]);' +
+            'if (type === "sidx") ptr -= 8;'); // prevent exception parsing segment index
+
+        // Allow the mp4 decoders to receive the headers
+        chunk = chunk.replace('obj = decode(', 'obj = decode.call(headers,');
     }
 
     // Replace the slow .slice(arguments) usage
@@ -93,10 +104,19 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
             'var streams = new Array(i);' +
             'while(i--) streams[i] = arguments[i];');
 
-        // we don't need fs
+        // we don't need fs nor process
         chunk = chunk.replace("var fs = require('fs')", '');
         chunk = chunk.replace('var isFS = function', 'if(0)$&');
         chunk = chunk.replace('isFS(stream)', '0');
+        chunk = chunk.replace('var ancient =', '//$&');
+    }
+
+    // Remove specific nodejs stuff unused in the browser
+    if (this.filename.indexOf('/end-of-stream/index.js') > 0) {
+        chunk = chunk.replace('isRequest(stream)', '0');
+        chunk = chunk.replace('isChildProcess(stream)', '0');
+        chunk = chunk.replace('var isRequest = ', 'if(0)x=');
+        chunk = chunk.replace('var isChildProcess = ', 'if(0)x=');
     }
 
     // readable-stream includes core-util-is, but it's unused in the browser, dead code elimination

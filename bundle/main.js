@@ -119,6 +119,7 @@ function VideoFile(data, streamer) {
     this.backoff = 200;
     this.paused = true;
     this.playing = false;
+    this.canplay = false;
     this.bgtask = !streamer.options.autoplay;
     this.retryq = [];
 
@@ -275,7 +276,7 @@ VideoFile.prototype.fetch = function fetch(startpos, recycle) {
     var pos = startpos;
     var p;
 
-    if (recycle && (/*this.throttle ||*/ this.paused) && this.cachesize >= this.minCache) {
+    if (recycle && (/*this.throttle ||*/ this.paused) && this.cachesize >= this.minCache && this.canplay) {
         if (d) {
             console.debug('[VideoFile.fetch()] MIN_CACHE reached, ' +
                 'will not fetch more data until no longer %s...', this.paused ? 'paused' : 'throttled');
@@ -618,6 +619,9 @@ Streamer.prototype.handleEvent = function(ev) {
             }
         /* fallthrought */
         case 'canplay':
+            if (1 || ev.type === 'canplay') {
+                videoFile.canplay = true;
+            }
             if (this.options.autoplay) {
                 this.play();
             }

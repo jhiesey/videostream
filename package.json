@@ -17,18 +17,18 @@
   "author": "John Hiesey",
   "license": "MIT",
   "dependencies": {
-    "binary-search": "^1.3.2",
+    "binary-search": "^1.3.3",
     "inherits": "^2.0.3",
     "mediasource": "^2.1.3",
     "mp4-box-encoding": "^1.1.2",
     "mp4-stream": "^2.0.2",
-    "pump": "^2.0.0",
+    "pump": "^2.0.1",
     "range-slice-stream": "^1.2.0",
     "readable-stream": "^2.3.3"
   },
   "devDependencies": {
     "browserify": "^15.2.0",
     "http-server": "^0.11.1",
-    "uglify-js": "^3.3.8"
+    "uglify-js": "^3.3.9"
   }
 }

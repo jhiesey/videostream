@@ -20,39 +20,88 @@ function MP4Remuxer (file) {
 
 inherits(MP4Remuxer, EventEmitter)
 
-MP4Remuxer.prototype._findMoov = function (offset) {
-	var self = this
+MP4Remuxer.prototype._parseMoov = function() {
+    var self = this;
+    var moov = self._moov;
+    var sidx = self._sidx;
 
-	if (self._decoder) {
-		self._decoder.destroy()
-	}
+    if (!moov) {
+        return;
+    }
+    self._moov = self._sidx = false;
 
-	self._decoder = mp4.decode()
-	var fileStream = self._file.createReadStream({
-		start: offset
-	})
-	fileStream.pipe(self._decoder)
+    if (self._decoder) {
+        self._decoder.destroy()
+    }
 
-	self._decoder.once('box', function (headers) {
+    try {
+        if (sidx) {
+            for (var i = moov.traks.length; i--;) {
+                var trak = moov.traks[i];
+                if (trak.tkhd.trackId === sidx.referenceId) {
+                    trak.sidx = sidx;
+                    break;
+                }
+            }
+        }
+        self._processMoov(moov);
+    }
+    catch (err) {
+        err.message = 'Cannot parse mp4 file: ' + err.message;
+        self.emit('error', err);
+    }
+};
+
+MP4Remuxer.prototype._findMoov = function(offset) {
+    var self = this;
+    var file = this._file;
+    var boxes = {'moov': 1, 'sidx': 1};
+    var lastbox = 'sidx';
+
+    if (!(d > 11)) {
+        lastbox = 'moov';
+        delete boxes.sidx;
+    }
+
+    if (file.filesize >= 0 && offset >= file.filesize) {
+        if (self._moov) {
+            return self._parseMoov();
+        }
+        return self.emit('error', RangeError('Offset out of bound.'));
+    }
+
+    var fileStream = file.createReadStream({start: offset});
+    self._decoder = mp4.decode();
+    fileStream.pipe(self._decoder);
+
+    self._decoder.once('box', function(headers) {
+        var findNextBox = function() {
+            self._decoder.destroy();
+
+            if (self['_' + lastbox]) {
+                self._parseMoov();
+            }
+            else {
+                self._findMoov(offset + headers.length);
+            }
+        };
+        fileStream.destroy();
+
         if (d) {
             console.debug('box', headers.type, headers.length, headers, offset);
         }
-		if (headers.type === 'moov') {
-			self._decoder.decode(function (moov) {
-				fileStream.destroy()
-				try {
-					self._processMoov(moov)
-				} catch (err) {
-					err.message = 'Cannot parse mp4 file: ' + err.message
-					self.emit('error', err)
-				}
-			})
-		} else {
-			fileStream.destroy()
-			self._findMoov(offset + headers.length)
-		}
-	})
-}
+
+        if (boxes[headers.type]) {
+            self._decoder.decode(function(data) {
+                self['_' + headers.type] = data;
+                findNextBox();
+            });
+        }
+        else {
+            findNextBox();
+        }
+    });
+};
 
 function RunLengthIndex (entries, countName) {
 	var self = this
@@ -350,13 +399,32 @@ MP4Remuxer.prototype.seek = function (time) {
 		self._fileStream = null
 	}
 
+    var highWaterMark = 0;
     var startOffset = Math.pow(2, 53);
     self._tracks.forEach(function(track, i) {
         track.fragment = self._generateFragment(i, time);
         if (track.fragment) {
-            startOffset = Math.min(startOffset, track.fragment.ranges[0].start);
+            var rangeStart = track.fragment.ranges[0].start;
+            startOffset = Math.min(startOffset, rangeStart);
+
+            if (!highWaterMark) {
+                highWaterMark = rangeStart;
+            }
+            else {
+                highWaterMark = Math.abs(highWaterMark - rangeStart);
+            }
         }
     });
+
+    if (d) {
+        console.debug('MP4Remuxer: Measured highWaterMark to need %s bytes.', highWaterMark);
+
+        if (highWaterMark > 1e7) {
+            // XXX: Check whether we should rather maintain two independent "fileStream"s...
+            console.warn('^ excessive highWaterMark detected...');
+        }
+    }
+    highWaterMark = (highWaterMark + 0x1000000) & -0x1000000;
 
     return self._tracks.map(function(track, i) {
 		// find the keyframe before the time
@@ -381,7 +449,7 @@ MP4Remuxer.prototype.seek = function (time) {
                 // Allow up to a 10MB offset between audio and video,
                 // which should be fine for any reasonable interleaving
                 // interval and bitrate
-                highWaterMark: 10000000
+                highWaterMark: highWaterMark
             });
 
             if (!self._fileStream) {
@@ -534,4 +602,68 @@ Box.boxes.co64.decode = function(buf, offset) {
     return {
         entries: entries
     }
+};
+
+Box.boxes.fullBoxes.sidx = true;
+Box.boxes.sidx = {};
+Box.boxes.sidx.decode = function(buf, offset) {
+    var r = Object.create(null);
+    var p = offset + 4, time;
+
+    var readUInt16 = function() {
+        var v = buf.readUInt16BE(p);
+        p += 2;
+        return v;
+    };
+    var readUInt32 = function() {
+        var v = buf.readUInt32BE(p);
+        p += 4;
+        return v;
+    };
+    var readUInt64 = function() {
+        var hi = readUInt32();
+        var lo = readUInt32();
+        return (hi * UINT32_MAX) + lo;
+    };
+
+    r.referenceId = readUInt32();
+    r.timescale = readUInt32();
+
+    if (this.version === 0) {
+        r.earliestPresentationTime = readUInt32();
+        r.firstOffset = readUInt32();
+    }
+    else {
+        r.earliestPresentationTime = readUInt64();
+        r.firstOffset = readUInt64();
+    }
+
+    readUInt16(); // skip reserved
+    r.count = readUInt16();
+    r.entries = new Array(r.count);
+
+    time = r.earliestPresentationTime;
+    offset = this.length + r.firstOffset;
+
+    for (var i = 0; i < r.count; i++) {
+        var e = r.entries[i] = Object.create(null);
+        var t = readUInt32();
+        e.type = (t >>> 31) & 1;
+        e.size = t & 0x7fffffff;
+        e.duration = readUInt32();
+
+        t = readUInt32();
+        e.sap = (t >>> 31) & 1;
+        e.sapType = (t >>> 28) & 0x7;
+        e.sapDelta = t & 0xfffffff;
+
+        // for an exact byte-offset on disk we need to add the size for ftyp+moov
+        e.byteOffset = [offset, offset + e.size - 1];
+        e.timeOffset = [time, time / r.timescale, e.duration / r.timescale];
+
+        offset += e.size;
+        time += e.duration;
+    }
+
+    return r;
 };
