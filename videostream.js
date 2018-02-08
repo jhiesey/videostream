@@ -103,7 +103,7 @@ VideoStream.prototype.createWriteStream = function(obj) {
                             sb.addEventListener('abort', console.warn.bind(console));
                             sb.addEventListener('error', console.warn.bind(console));
                         }
-                        console.warn('Appending buffer to media source ' + sb._mimeType, chunk, sb, this._mediaSource.readyState);
+                        console.warn('Appending buffer to media source ' + sb._mimeType, [chunk], sb, this._mediaSource.readyState);
                     }
                     sb.appendBuffer(toArrayBuffer(chunk));
                     this._cb = cb;
@@ -168,20 +168,26 @@ VideoStream.prototype.createWriteStream = function(obj) {
 
 VideoStream.prototype._pump = function() {
     try {
-        this._unsafePump();
+        this._tryPump();
     }
     catch (ex) {
-        this._onError(ex);
+        this._elemWrapper.error(ex);
     }
 };
 
-VideoStream.prototype._unsafePump = function() {
+VideoStream.prototype._tryPump = function() {
     var self = this;
-    var muxed = self._muxer.seek(self._elem.currentTime, !self._tracks);
+    var currentTime = self._elem.currentTime;
+    var muxed = self._muxer.seek(currentTime, !self._tracks);
 
     self._tracks.forEach(function(track, i) {
         var pumpTrack = function() {
             if (track.muxed) {
+                var ms = track.mediaSource || false;
+                if (ms._type === 'audio/mpeg' && ms._sourceBuffer) {
+                    // Needed for Chrome to allow seeking to work properly with raw mp3 streams
+                    ms._sourceBuffer.timestampOffset = currentTime;
+                }
                 track.muxed.destroy();
                 track.mediaSource = self.createWriteStream(track.mediaSource)
             }

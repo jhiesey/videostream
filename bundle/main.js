@@ -573,7 +573,9 @@ Streamer.prototype.onPlayBackEvent = function(playing) {
             this.notify('activity');
 
             // XXX: on MSIE the video continues stalled while audio does play, seeking back fixes it..
-            this.video.currentTime = this.video.currentTime - .2;
+            if ("ActiveXObject" in window) {
+                this.video.currentTime = this.video.currentTime - .2;
+            }
         }
         this.inactivity = false;
     }
@@ -866,7 +868,7 @@ Streamer.getThumbnail = function(data) {
 
         s.on('playing', function() {
             if (!++step) {
-                video.currentTime = 20 * video.duration / 100;
+                video.currentTime = 20 * (video.duration | 0) / 100;
                 return true;
             }
 
@@ -880,6 +882,12 @@ Streamer.getThumbnail = function(data) {
 Object.defineProperty(Streamer.prototype, 'hasAudio', {
     get: function() {
         return this.stream && Object(this.stream._muxer)._hasAudio;
+    }
+});
+
+Object.defineProperty(Streamer.prototype, 'hasVideo', {
+    get: function() {
+        return this.stream && Object(this.stream._muxer)._hasVideo;
     }
 });
 

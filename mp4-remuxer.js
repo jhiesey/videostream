@@ -126,7 +126,7 @@ RunLengthIndex.prototype.inc = function () {
 
 MP4Remuxer.prototype._processMoov = function (moov) {
 	var self = this
-
+	var mp3audio = {'mp4a.6b': 1, 'mp4a.69': 1};
 	var traks = moov.traks
 	self._tracks = []
 	self._hasVideo = false
@@ -142,11 +142,7 @@ MP4Remuxer.prototype._processMoov = function (moov) {
         if (d) {
             console.debug('handler=%s, type=%s, trak:', handlerType, stsdEntry.type, trak);
         }
-		if (handlerType === 'vide' && stsdEntry.type === 'avc1') {
-			if (self._hasVideo) {
-				continue
-			}
-			self._hasVideo = true
+        if (!self._hasVideo && handlerType === 'vide' && stsdEntry.type === 'avc1') {
 			codec = 'avc1'
 			if (stsdEntry.avcC) {
 				codec += '.' + stsdEntry.avcC.mimeCodec
@@ -155,23 +151,35 @@ MP4Remuxer.prototype._processMoov = function (moov) {
             if (d) {
                 console.debug(mime);
             }
-		} else if (handlerType === 'soun' && stsdEntry.type === 'mp4a') {
-			if (self._hasAudio) {
-				continue
+            self._hasVideo = codec;
+        }
+        else if (!self._hasAudio && handlerType === 'soun' && (stsdEntry.type === 'mp4a' || stsdEntry.type === 'fLaC')) {
+            mime = 'audio/mp4; codecs="%"';
+            if (stsdEntry.type === 'mp4a') {
+                codec = 'mp4a'
+                if (stsdEntry.esds && stsdEntry.esds.mimeCodec) {
+                    codec += '.' + stsdEntry.esds.mimeCodec
+                }
+                // Even though MSIE/Edge does support mp4a.6b/mp4a.69, it doesn't seem to like the way we feed MSE
+                if (mp3audio[codec] /*&& !MediaSource.isTypeSupported(mime.replace('%', codec))*/) {
+                    // Firefox allows mp3 in mp4 this way
+                    codec = 'mp3'
+                }
+            }
+            else {
+                codec = 'flac';
 			}
-			codec = 'mp4a'
-			if (stsdEntry.esds && stsdEntry.esds.mimeCodec) {
-				codec += '.' + stsdEntry.esds.mimeCodec
-			}
-			mime = 'audio/mp4; codecs="' + codec + '"'
+            mime = mime.replace('%', codec);
             if (d) {
                 console.debug(mime);
             }
             if (!MediaSource.isTypeSupported(mime)) {
-                // Let's continue without audio if actually unsupported, e.g. mp4a.6B (MP3)
-                continue;
+                if (codec !== 'mp3' || !MediaSource.isTypeSupported(mime = 'audio/mpeg')) {
+                    // Let's continue without audio if actually unsupported, e.g. mp4a.6B (MP3)
+                    continue;
+                }
             }
-            self._hasAudio = true
+            self._hasAudio = codec;
 		} else {
 			continue
 		}
@@ -184,6 +192,7 @@ MP4Remuxer.prototype._processMoov = function (moov) {
 		var chunk = 0
 		var offsetInChunk = 0
 		var sampleToChunkIndex = 0
+        var currChunkEntry;
 
 		// Time data
 		var dts = 0
@@ -196,8 +205,13 @@ MP4Remuxer.prototype._processMoov = function (moov) {
 		// Sync table index
 		var syncSampleIndex = 0
 
-		while (true) {
-			var currChunkEntry = stbl.stsc.entries[sampleToChunkIndex]
+        if (!decodingTimeEntry.value) {
+            console.warn("No 'stts' entries for trak %s...", i, trak);
+            continue;
+        }
+
+        while (true) {
+            currChunkEntry = stbl.stsc.entries[sampleToChunkIndex]
 
 			// Compute size
 			var size = stbl.stsz.entries[sample]
@@ -257,7 +271,7 @@ MP4Remuxer.prototype._processMoov = function (moov) {
 		trak.mdia.mdhd.duration = 0
 		trak.tkhd.duration = 0
 
-		var defaultSampleDescriptionIndex = currChunkEntry.sampleDescriptionId
+        var defaultSampleDescriptionIndex = currChunkEntry && currChunkEntry.sampleDescriptionId || 0;
 
 		var trackMoov = {
 			type: 'moov',
@@ -463,10 +477,10 @@ MP4Remuxer.prototype.seek = function (time) {
     });
 };
 
-MP4Remuxer.prototype._findSampleBefore = function (trackInd, time) {
+MP4Remuxer.prototype._findSampleBefore = function(trackId, time) {
 	var self = this
 
-	var track = self._tracks[trackInd]
+    var track = self._tracks[trackId]
 	var scaledTime = Math.floor(track.timeScale * time)
 	var sample = bs(track.samples, scaledTime, function (sample, t) {
 		var pts = sample.dts + sample.presentationOffset// - track.editShift
@@ -479,10 +493,13 @@ MP4Remuxer.prototype._findSampleBefore = function (trackInd, time) {
 	}
 	if (sample < 1) return 0
 	// sample is now the last sample with dts <= time
-	// Find the preceeding sync sample
+    // Find the preceding sync sample
+    var sampleIdx = sample;
 	while (!track.samples[sample].sync) {
-		sample--
-	}
+        if (--sample < 0) {
+            return sampleIdx;
+        }
+    }
 	return sample
 }
 
