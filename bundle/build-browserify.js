@@ -97,6 +97,14 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
         chunk = chunk.replace('obj = decode(', 'obj = decode.call(headers,');
     }
 
+    // Prevent the closures from implicit Buffer usages
+    if (this.filename.indexOf('/mp4-box-encoding/') > 0
+        || this.filename.indexOf('/uint64be/index.js') > 0
+        || this.filename.indexOf('/mp4-stream/decode') > 0) {
+
+        chunk = 'var Buffer = require("buffer").Buffer;\n' + chunk;
+    }
+
     // Replace the slow .slice(arguments) usage
     if (this.filename.indexOf('/pump/index.js') > 0) {
         chunk = chunk.replace('var streams = Array.prototype.slice.call(arguments)',
@@ -132,8 +140,12 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
 
         // We don't need any process.* stuff...
         const re = new RegExp("require('process-nextick-args')".replace(/\W/g, '\\$&'), 'g');
-        chunk = chunk.replace(re, self.getUtilsMod(1) + '.nextTick');
+        chunk = chunk.replace(re, self.getUtilsMod(1));
         chunk = chunk.replace(' && dest !== process.stdout && dest !== process.stderr', '');
+
+        // We don't need util.inspect...
+        chunk = chunk.replace("var util = require('util');", '');
+        chunk = chunk.replace('util && util.inspect && util.inspect.custom', '0');
 
         chunk = this.getReplacements(chunk, function(match) {
 
@@ -157,6 +169,11 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
                 return 'var _isUint8Array=' + self.getUtilsMod(1) + '.isU8,Buffer=require("buffer").Buffer';
             }
 
+            // No Object.keys polyfill needed
+            if (match.replace('var objectKeys = ') > 0) {
+                return 'var objectKeys = Object.keys;';
+            }
+
             return match;
         });
 
@@ -174,6 +191,12 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
             'var nextTick=' + self.getUtilsMod(1) + '.nextTick, Buffer = require("buffer").Buffer;\n$&');
     }
 
+    // Invoke self._createSourceBuffer() failures asynchronously.
+    if (this.filename.indexOf('/mediasource/index.js') > 0) {
+        chunk = chunk.replace("self.destroy(new Error('The provided type is not supported'))",
+            "onIdle(self.destroy.bind(self, new Error('The provided type is not supported')))");
+    }
+
     // Fix off-by-one bug in uint64be v1.0.1
     if (this.filename.indexOf('/uint64be/index.js') > 0) {
         chunk = chunk.replace('UINT_32_MAX = 0xffffffff', 'UINT_32_MAX = Math.pow(2, 32)');
@@ -184,6 +207,9 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
 
     // No fallback needed for Object.create
     chunk = chunk.replace("require('inherits')", self.getUtilsMod(1) + '.inherit');
+
+    // Let's use eventemitter3
+    chunk = chunk.replace(/require\(["']events["']\)/g, 'require("eventemitter3")');
 
     // Let's remove dead code and such...
     const uglify = UglifyJS.minify(chunk, {

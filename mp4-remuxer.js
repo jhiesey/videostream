@@ -47,7 +47,6 @@ MP4Remuxer.prototype._parseMoov = function() {
         self._processMoov(moov);
     }
     catch (err) {
-        err.message = 'Cannot parse mp4 file: ' + err.message;
         self.emit('error', err);
     }
 };

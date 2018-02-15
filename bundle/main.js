@@ -389,6 +389,8 @@ VideoFile.prototype.fetch = function fetch(startpos, recycle) {
             self.overquota = false;
         })
         .catch(function(ev, data) {
+            var xhr = ev && ev.target || false;
+
             if (self.mru === undefined) {
                 // destroyed while loading
                 return;
@@ -407,7 +409,7 @@ VideoFile.prototype.fetch = function fetch(startpos, recycle) {
                     self.streamer.notify('error', new Error(api_strerror(ev)));
                 }
             }
-            else if (ev.target.status === 509) {
+            else if (xhr.status === 509) {
                 if (d) {
                     console.warn('stream overquota, holding...', ev);
                 }
@@ -421,7 +423,7 @@ VideoFile.prototype.fetch = function fetch(startpos, recycle) {
                 }
 
                 if (self.isOnline) {
-                    if (!ev.target.status) {
+                    if (!xhr.status) {
                         // retry immediately if e.g. error 0x2ef3 on MSIE...
                         retry();
                     }
