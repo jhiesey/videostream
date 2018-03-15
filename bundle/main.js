@@ -47,6 +47,7 @@ CacheStream.prototype._read = function(size) {
 
     var videoFile = this._file;
     var videoStream = videoFile._vs;
+    var fileSize = videoFile.filesize;
     var currentTime = videoStream._elem.currentTime;
     var bufTime = currentTime && !videoFile.seeking && videoStream.bufTime;
 
@@ -91,6 +92,11 @@ CacheStream.prototype._read = function(size) {
         if (!this.push(Buffer.from(videoFile.cache[p], offset, t))) {
             break;
         }
+    }
+
+    if (fileSize && this.pos === fileSize) {
+        // signal eof
+        this.push(null);
     }
 };
 
@@ -259,6 +265,9 @@ VideoFile.prototype.fetcher = function(data, byteOffset, byteLength) {
 };
 
 VideoFile.prototype.fileReader = function(data, byteOffset, byteLength) {
+    if (byteOffset > data.size) {
+        return Promise.reject(ERANGE);
+    }
     return new Promise(function(resolve, reject) {
         var blob = data.slice(byteOffset, byteLength);
         var reader = new FileReader();
@@ -402,7 +411,7 @@ VideoFile.prototype.fetch = function fetch(startpos, recycle) {
             };
 
             if (typeof ev === 'number') {
-                if (ev !== ERANGE || pos < data.s) {
+                if (ev !== ERANGE || data && pos < data.s) {
                     if (d) {
                         console.warn('Unrecoverable stream fetch error, aborting...', self.isOnline, ev, pos);
                     }
@@ -462,7 +471,6 @@ VideoFile.prototype.feedPlayer = function() {
  * @preserve
  */
 function Streamer(data, video, options) {
-    var doSourceBufferFlush = false;
     var uad = ua.details;
 
     if (!(this instanceof Streamer)) {
@@ -475,7 +483,7 @@ function Streamer(data, video, options) {
         'abort', 'updateend', 'ended', 'stalled', 'suspend'
     ];
     if (video.parentNode && uad.engine === 'Gecko' && parseInt(uad.version) < 57) {
-        doSourceBufferFlush = true;
+        this.sbflush = true;
         this._events.push('seeking');
         this.WILL_AUTOPLAY_ONSEEK = true;
     }
@@ -491,28 +499,72 @@ function Streamer(data, video, options) {
     this.activitimer = null;
     this.evs = Object.create(null);
 
+    if (this.options.type === undefined) {
+        // No type given, try to guess if that's a webm otherwise it'll fallback to mp4
+
+        this.initTypeGuess(data);
+    }
+    else {
+        this.init(data);
+    }
+
+    if (d) {
+        window.strm = this;
+    }
+}
+
+Streamer.prototype = Object.create(null);
+
+Streamer.prototype.init = function(data) {
+    if (!this.video) {
+        if (d) {
+            console.debug('Cannot initialize... already destroyed?', this);
+        }
+        return;
+    }
     this.file = new VideoFile(data, this);
 
     if (this.options.autoplay === false) {
         this.file.minCache = 0x1000000;
     }
     else {
-        video.setAttribute('autoplay', true);
+        this.video.setAttribute('autoplay', true);
     }
 
     var videoStreamOptions = {
-        sbflush: doSourceBufferFlush,
+        sbflush: this.sbflush,
+        type: this.options.type,
         bufferDuration: MAX_BUF_SECONDS * 1.8
     };
-    this.stream = new VideoStream(this.file.fetch(0), video, videoStreamOptions);
+    this.stream = new VideoStream(this.file.fetch(0), this.video, videoStreamOptions);
     this.file._vs = this.stream;
+};
 
-    if (d) {
-        self.strm = this;
-    }
-}
+Streamer.prototype.initTypeGuess = function(data) {
+    var self = this;
+    var file = new VideoFile(data, self);
+    var init = function(data) {
+        file.destroy();
+        self.init(data);
+    };
 
-Streamer.prototype = Object.create(null);
+    file.fetcher(data, 0, 4)
+        .then(function(chunk) {
+            var dv = new DataView(chunk.buffer);
+            delete chunk.buffer;
+
+            if (dv.getUint32(0, false) === 0x1A45DFA3) {
+                self.options.type = 'WebM';
+            }
+            init(typeof data === 'string' ? chunk : data);
+        })
+        .catch(function(ex) {
+            if (d) {
+                console.debug('Type guess failed...', ex);
+            }
+            init(data);
+        });
+};
 
 Streamer.prototype.destroy = function() {
     var i;
@@ -528,7 +580,9 @@ Streamer.prototype.destroy = function() {
     catch (ex) {
         console.warn(ex);
     }
-    this.file.destroy();
+    if (this.file) {
+        this.file.destroy();
+    }
 
     if (this.video) {
         for (i = this._events.length; i--;) {
@@ -626,7 +680,7 @@ Streamer.prototype.handleEvent = function(ev) {
             if (1 || ev.type === 'canplay') {
                 videoFile.canplay = true;
             }
-            if (this.options.autoplay) {
+            if (this.options.autoplay && !videoFile.playing) {
                 this.play();
             }
             break;
@@ -678,14 +732,15 @@ Streamer.prototype.handleEvent = function(ev) {
         var error;
 
         if (ev.type === 'error') {
-            error = this.stream._elemWrapper.detailedError;
-            if (!error) {
-                var mediaError = target.error || false;
-                error = mediaError.message;
+            var mediaError = target.error || false;
+            var streamError = this.stream._elemWrapper.detailedError;
+            error = streamError || mediaError.message;
 
-                if (mediaError.code) {
-                    console.warn('MediaError %s', mediaError.code, error);
-                }
+            if (mediaError.code) {
+                console.warn('MediaError %s', mediaError.code, mediaError.message);
+            }
+            if (streamError) {
+                console.warn('StreamError', streamError);
             }
         }
         this.notify(ev, error || false);

@@ -6,7 +6,7 @@ var onNextTick = function(cb) {
 
 if (typeof requestIdleCallback !== 'undefined') {
     onNextTick = function(cb) {
-        requestIdleCallback(function() { cb() }, {timeout: 10});
+        requestIdleCallback(function() { cb() });
     };
 }
 

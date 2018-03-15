@@ -2,6 +2,7 @@
 
 var pump = require('pump');
 var MP4Remuxer = require('./mp4-remuxer');
+var EBMLRemuxer = require('./ebml-remuxer');
 var MediaElementWrapper = require('mediasource');
 var toArrayBuffer = require('to-arraybuffer');
 
@@ -19,17 +20,16 @@ function VideoStream(file, mediaElem, opts) {
     self._elem = mediaElem;
     self._elemWrapper = new MediaElementWrapper(mediaElem, opts);
     self._waitingFired = false;
+    self._seekCoercion = false;
     self._trackMeta = null;
     self._file = file;
     self._tracks = null;
+    self._type = opts.type;
     if (self._elem.preload !== 'none') {
         self._createMuxer()
     }
-    if (!opts.sbflush) {
-        self.flushSourceBuffers = function() {
-            /* noop */
-        };
-    }
+    self.flushSourceBuffers = opts.sbflush ? self._flushSourceBuffers : function() { /* noop */
+    };
 
     self._onError = function(err) {
         self.detailedError = self._elemWrapper.detailedError || err;
@@ -44,6 +44,9 @@ function VideoStream(file, mediaElem, opts) {
             self._createMuxer()
         }
         else if (self._tracks) {
+            /*if (d && self._type === 'WebM' && self._elem.currentTime) {
+                self.findTimeGAPs();
+            }*/
             self._pump()
         }
     };
@@ -55,8 +58,8 @@ VideoStream.prototype = Object.create(null);
 
 VideoStream.prototype._createMuxer = function() {
     var self = this;
-    self._muxer = new MP4Remuxer(self._file);
-    self._muxer.on('ready', function(data) {
+    self._muxer = self._type === 'WebM' ? new EBMLRemuxer(self._file) : new MP4Remuxer(self._file);
+    self._muxer.once('ready', function(data) {
         self._tracks = data.map(function(trackData) {
             var mediaSource = self.createWriteStream(trackData.mime);
             var track = {
@@ -96,6 +99,7 @@ VideoStream.prototype.createWriteStream = function(obj) {
 
             if (sb && !sb.updating) {
                 try {
+                    /**
                     if (d > 6) {
                         if (!sb._mimeType) {
                             sb._mimeType = mediaSource._type;
@@ -105,6 +109,35 @@ VideoStream.prototype.createWriteStream = function(obj) {
                         }
                         console.warn('Appending buffer to media source ' + sb._mimeType, [chunk], sb, this._mediaSource.readyState);
                     }
+                    /**/
+
+                    if (chunk.duration) {
+                        var time = sb.buffered.length ? sb.buffered.end(0) : 0;
+                        /**
+                        var start = time;
+                        var end = time + chunk.duration;
+
+                        if (d) {
+                            var b = [];
+                            for (var i = 0; i < sb.buffered.length; ++i) {
+                                b.push(sb.buffered.start(i) + '-' + sb.buffered.end(i));
+                            }
+                            console.debug('ranges(%s), timecode=%s, duration=%s, time=%s, start=%s(%s), end=%s(%s)',
+                                b.join(', '), chunk.timecode, chunk.duration, time,
+                                start, sb.appendWindowStart, end, sb.appendWindowEnd,
+                                sb.timestampOffset, chunk.seektime);
+                        }
+                        /**/
+
+                        if (chunk.seektime !== undefined && (!time || time > chunk.seektime)) {
+                            time = chunk.seektime;
+                        }
+
+                        sb.timestampOffset = time;
+                        // sb.appendWindowStart = start;
+                        // sb.appendWindowEnd = end;
+                    }
+
                     sb.appendBuffer(toArrayBuffer(chunk));
                     this._cb = cb;
                     return;
@@ -168,7 +201,14 @@ VideoStream.prototype.createWriteStream = function(obj) {
 
 VideoStream.prototype._pump = function() {
     try {
-        this._tryPump();
+        var time = this._elem.currentTime;
+
+        if (!this.withinBufferedRange(time)) {
+            this._tryPump();
+        }
+        else if (d) {
+            console.debug('Ignoring pump within buffered range.', time);
+        }
     }
     catch (ex) {
         this._elemWrapper.error(ex);
@@ -177,19 +217,69 @@ VideoStream.prototype._pump = function() {
 
 VideoStream.prototype._tryPump = function() {
     var self = this;
-    var currentTime = self._elem.currentTime;
-    var muxed = self._muxer.seek(currentTime, !self._tracks);
+    var video = self._elem;
+    var muxer = self._muxer;
+    var currentTime = video.currentTime;
+    var muxed = muxer.seek(currentTime);
+    var timeStampFixup = muxer._seekTimeFixup;
+
+    if (d) {
+        console.debug('Seeking to %s, fixup=%s', currentTime, timeStampFixup);
+    }
+
+    if (currentTime - timeStampFixup > .4 || timeStampFixup === 0) {
+        var i, m;
+
+        if (self._seekCoercion === timeStampFixup) {
+            if (d) {
+                console.debug('Seek coercion, waiting for more data...');
+            }
+        }
+        else {
+            if (d) {
+                console.debug('Applying timestamp fixup...', currentTime, timeStampFixup);
+            }
+
+            for (i = muxed.length; i--;) {
+                m = muxed[i];
+                if (m.inStream) {
+                    m.inStream.destroy();
+                }
+                if (m.outStream) {
+                    m.outStream.destroy();
+                }
+            }
+
+            self._seekCoercion = timeStampFixup;
+            video.currentTime = timeStampFixup;
+
+            if (!this.withinBufferedRange(timeStampFixup)) {
+                this._tryPump();
+            }
+            return;
+        }
+    }
 
     self._tracks.forEach(function(track, i) {
         var pumpTrack = function() {
             if (track.muxed) {
-                var ms = track.mediaSource || false;
-                if (ms._type === 'audio/mpeg' && ms._sourceBuffer) {
-                    // Needed for Chrome to allow seeking to work properly with raw mp3 streams
-                    ms._sourceBuffer.timestampOffset = currentTime;
-                }
+                var ms = track.mediaSource;
+                var sb = ms && ms._sourceBuffer;
+
                 track.muxed.destroy();
-                track.mediaSource = self.createWriteStream(track.mediaSource)
+                track.mediaSource = self.createWriteStream(ms);
+                // self._flushSourceBuffers(-1)
+
+                if (sb) {
+                    if (ms._type === 'audio/mpeg') {
+                        // Needed for Chrome to allow seeking to work properly with raw mp3 streams
+                        sb.timestampOffset = currentTime;
+                    }
+
+                    if (timeStampFixup !== undefined) {
+                        self.removeBuffered(sb, currentTime);
+                    }
+                }
             }
             track.muxed = muxed[i];
             pump(track.muxed, track.mediaSource)
@@ -265,8 +355,81 @@ VideoStream.prototype.forEachSourceBuffer = function(cb) {
     }
 };
 
+VideoStream.prototype.removeBuffered = function(sb, currentTime) {
+    if (sb.buffered.length) {
+        var startRange = sb.buffered.start(0);
+        var endRange = sb.buffered.end(sb.buffered.length - 1);
+
+        if (d) {
+            console.debug('Removing source buffered range (%s:%s-%s)', currentTime, startRange, endRange);
+        }
+
+        if (currentTime > startRange && currentTime < endRange) {
+            startRange = currentTime;
+        }
+
+        sb.remove(startRange, endRange);
+        return true;
+    }
+
+    return false;
+};
+
+VideoStream.prototype.withinBufferedRange = function(time, sb) {
+    var ranges = this.getBufferedRange(sb);
+
+    return time > ranges[0] && ranges[1] > time;
+};
+
+VideoStream.prototype.getBufferedRange = function(sb) {
+    if (!sb) {
+        var tk = this._tracks;
+        var ms = tk && tk[0].mediaSource;
+        sb = ms && ms._sourceBuffer;
+    }
+
+    return (sb && sb.buffered.length) ? [sb.buffered.start(0), sb.buffered.end(sb.buffered.length - 1)] : false;
+};
+
+VideoStream.prototype.findTimeGAPs = function() {
+    var gap = {};
+    this.forEachBufferedRanges(function(sb, sr, er, ct, ms, tid, bid) {
+        if (bid && !gap[tid]) {
+            gap[tid] = 1;
+            console.warn('SourceBuffer has a gap!', [sb], [ms]);
+        }
+
+        if (gap[tid]) {
+            console.debug('buffer gap on track%s(%s), sr=%s, er=%s, ct=%s', tid, bid, sr, er, ct);
+        }
+    });
+};
+
+VideoStream.prototype.forEachBufferedRanges = function(cb) {
+    if (this._tracks) {
+        var trackId, j, currentTime = this._elem.currentTime, sb, startRange, endRange, ms;
+
+        for (trackId = this._tracks.length; trackId--;) {
+            ms = this._tracks[trackId].mediaSource._mediaSource;
+            sb = this._tracks[trackId].mediaSource._sourceBuffer;
+
+            for (j = sb.buffered.length; j--;) {
+                try {
+                    endRange = sb.buffered.end(j);
+                    startRange = sb.buffered.start(j);
+
+                    cb.call(this, sb, startRange, endRange, currentTime, ms, trackId, j);
+                }
+                catch (ex) {
+                    console.debug(ex);
+                }
+            }
+        }
+    }
+};
+
 // Flush source buffers when seeking backward or forward
-VideoStream.prototype.flushSourceBuffers = function(mode) {
+VideoStream.prototype._flushSourceBuffers = function(mode) {
     this.forEachSourceBuffer(function(sb, startRange, endRange, currentTime, mediaSource) {
         if (d) {
             console.debug('[VideoStream.flushSourceBuffers] ct=%s sr=%s er=%s',
@@ -306,30 +469,44 @@ VideoStream.prototype.flushSourceBuffers = function(mode) {
 // Returns the number of buffered seconds
 Object.defineProperty(VideoStream.prototype, 'bufTime', {
     get: function() {
-        var trak = this._muxer._tracks[0] || false;
-        var smpl = trak && trak.samples[trak.currSample] || false;
-        var time = (smpl.dts + smpl.duration) / trak.timeScale;
+        var time = 0;
 
-        if (0) {
-            var result = time - this._elem.currentTime;
+        if (this._muxer instanceof MP4Remuxer) {
+            var trak = this._muxer._tracks[0] || false;
+            var smpl = trak && trak.samples[trak.currSample] || false;
+            time = (smpl.dts + smpl.duration) / trak.timeScale;
 
-            if (d) {
-                var trakBufTimes = [];
+            if (0) {
+                var result = time - this._elem.currentTime;
 
-                for (var i = Object(this._tracks).length; i--;) {
-                    var mediaSourceStream = this._tracks[i].mediaSource;
+                if (d) {
+                    var trakBufTimes = [];
 
-                    trakBufTimes[i] = mediaSourceStream._getBufferDuration()
-                        + '@' + mediaSourceStream._mediaSource.readyState;
+                    for (var i = Object(this._tracks).length; i--;) {
+                        var mediaSourceStream = this._tracks[i].mediaSource;
+
+                        trakBufTimes[i] = mediaSourceStream._getBufferDuration()
+                            + '@' + mediaSourceStream._mediaSource.readyState;
+                    }
+
+                    console.warn('bufTime=%s, MediaSource: ', result, trakBufTimes.join(','));
                 }
-
-                console.warn('bufTime=%s, MediaSource: ', result, trakBufTimes.join(','));
             }
 
-            return result;
-        }
-        else {
             return time - this._elem.currentTime;
         }
+
+        if (this._muxer instanceof EBMLRemuxer) {
+            for (var i = Object(this._tracks).length; i--;) {
+                var mediaSourceStream = this._tracks[i].mediaSource;
+                var mediaSource = mediaSourceStream && mediaSourceStream._mediaSource;
+
+                if (mediaSource.readyState === 'open') {
+                    time = Math.max(time, mediaSourceStream._getBufferDuration());
+                }
+            }
+        }
+
+        return time;
     }
 });

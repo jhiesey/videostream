@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 // Required dependencies
+const util = require('util');
 const inherits = require('inherits');
 const pkg = require('../package.json');
 const UglifyJS = require("uglify-js");
@@ -10,7 +11,7 @@ const Transform = require('stream').Transform || require('readable-stream').Tran
 // Helper constants
 const cwd = String(process.cwd()).replace(/\\/g, '/');
 const startTime = Date.now();
-let files = 0, sizes = 0;
+let files = 0, sizes = 0, error = 0;
 
 // Starts bundle creation
 function makeBundle() {
@@ -49,7 +50,7 @@ function makeBundle() {
                 'Process took: ' + (Date.now() - startTime) + 'ms\n'
             );
 
-            process.exit(0);
+            process.exit(error);
         }
     });
 }
@@ -69,14 +70,30 @@ function Megaify(filename) {
 
     files++;
     sizes += this.filesize;
+
+    this.readLength = 0;
+    this.chunks = [];
 }
 
 inherits(Megaify, Transform);
 
 Megaify.prototype._transform = function(chunk, enc, cb) {
     const self = this;
+    let beautify = true;
 
     chunk = chunk.toString('utf-8');
+
+    if (chunk.length < this.filesize) {
+        this.readLength += chunk.length;
+        this.chunks.push(chunk);
+
+        process.stderr.write('Transform(' + this.filename + ') ' + this.readLength + '/' + this.filesize + '\n');
+
+        if (this.readLength < this.filesize) {
+            return cb();
+        }
+        chunk = this.chunks.join('');
+    }
 
     // Export mp4-box-encoding's boxes so we can extend them externally
     if (this.filename.indexOf('/mp4-box-encoding/index.js') > 0) {
@@ -98,7 +115,9 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
     }
 
     // Prevent the closures from implicit Buffer usages
-    if (this.filename.indexOf('/mp4-box-encoding/') > 0
+    if (this.filename.indexOf('/ebml/tools.js') > 0
+        || this.filename.indexOf('/ebml/decoder.js') > 0
+        || this.filename.indexOf('/mp4-box-encoding/') > 0
         || this.filename.indexOf('/uint64be/index.js') > 0
         || this.filename.indexOf('/mp4-stream/decode') > 0) {
 
@@ -125,6 +144,14 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
         chunk = chunk.replace('isChildProcess(stream)', '0');
         chunk = chunk.replace('var isRequest = ', 'if(0)x=');
         chunk = chunk.replace('var isChildProcess = ', 'if(0)x=');
+    }
+
+    // Let's apply some micro optimizations...
+    if (this.filename.indexOf('/buffer/index.js') > 0) {
+        chunk = chunk.replace(/assertSize\(size\)/g, '');
+        chunk = chunk.replace(/ checked\(([^)]+)\) \| 0/g, ' $1 | 0');
+        chunk = chunk.replace(/!noAssert/g, '0'); /* <- !!! */
+        chunk = chunk.replace(/function (?:checked|assertSize|checkOffset|checkInt|checkIEEE754)/g, 'if(0)var _=$&');
     }
 
     // readable-stream includes core-util-is, but it's unused in the browser, dead code elimination
@@ -170,7 +197,7 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
             }
 
             // No Object.keys polyfill needed
-            if (match.replace('var objectKeys = ') > 0) {
+            if (match.indexOf('var objectKeys = ') > 0) {
                 return 'var objectKeys = Object.keys;';
             }
 
@@ -202,38 +229,70 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
         chunk = chunk.replace('UINT_32_MAX = 0xffffffff', 'UINT_32_MAX = Math.pow(2, 32)');
     }
 
+    // Make the ebml schema smaller (saving ~40KB)
+    if (this.filename.indexOf('/ebml/schema.js') > 0) {
+        chunk = chunk.replace(/^\s+"(?:description|cppname)":\s*".*",?$/mg, '');
+        beautify = false;
+    }
+
     // safe-buffer seems redundant for the browser...
     chunk = chunk.replace("require('safe-buffer').Buffer", "require('buffer').Buffer");
 
     // No fallback needed for Object.create
     chunk = chunk.replace("require('inherits')", self.getUtilsMod(1) + '.inherit');
+    chunk = chunk.replace("require('util').inherits", self.getUtilsMod(1) + '.inherit');
 
-    // Let's use eventemitter3
+    // Let's always use readable-stream
+    chunk = chunk.replace(/require\(["']stream["']\)/g, 'require("readable-stream")');
+
+    // BEGIN EventEmitter3 Tweaks
     chunk = chunk.replace(/require\(["']events["']\)/g, 'require("eventemitter3")');
 
+    // Extend EventEmitter3 to support prependListener
+    if (this.filename.indexOf('/eventemitter3/index.js') > 0) {
+        chunk = chunk.replace('EventEmitter.prototype.on = function on(event, fn, context', '$&, pp');
+        chunk = chunk.replace('return addListener(this, event, fn, context, false', '$&, pp');
+        chunk = chunk.replace('function addListener(emitter, event, fn, context, once', '$&, pp');
+        chunk = chunk.replace('[evt].push(listener)', '[evt][pp?"unshift":"push"](listener)');
+        chunk = chunk.replace('[emitter._events[evt], listener]', 'pp ? [listener,emitter._events[evt]] : $&');
+    }
+
+    // Replace prependListener usage.
+    if (this.filename.indexOf('/readable-stream/lib/_stream_readable.js') > 0) {
+        chunk = chunk.replace("prependListener(dest, 'error', onerror)", "dest.on('error', onerror, 0, true)");
+    }
+    // END EventEmitter3 Tweaks
+
+    // Remove debug calls
+    chunk = chunk.replace("require('debug')", '');
+    chunk = chunk.replace(/^\s*debug\(.*\);$/gm, '');
+
     // Let's remove dead code and such...
-    const uglify = UglifyJS.minify(chunk, {
+    const uglify = 10&&UglifyJS.minify(chunk, {
         warnings: true,
         mangle: {
             keep_fnames: true
         },
         compress: {
             passes: 2,
+            loops: false,
             sequences: false,
+            comparisons: false,
             pure_getters: true,
             keep_infinity: true
         },
         output: {
-            beautify: true,
             indent_level: 2,
             ascii_only: true,
-            comments: 'some'
+            comments: 'some',
+            beautify: beautify
         }
     });
 
     if (uglify) {
         if (uglify.error) {
-            process.stderr.write('UglifyJS error: ' + uglify.error + '\n');
+            error++;
+            process.stderr.write('UglifyJS error: ' + util.inspect(uglify) + '\n');
         }
         else {
             chunk = uglify.code;
