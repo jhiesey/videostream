@@ -25,6 +25,7 @@ function VideoStream(file, mediaElem, opts) {
     self._file = file;
     self._tracks = null;
     self._type = opts.type;
+    self._startTime = opts.startTime;
     if (self._elem.preload !== 'none') {
         self._createMuxer()
     }
@@ -47,7 +48,8 @@ function VideoStream(file, mediaElem, opts) {
             /*if (d && self._type === 'WebM' && self._elem.currentTime) {
                 self.findTimeGAPs();
             }*/
-            self._pump()
+            self._pump(self._startTime | 0);
+            self._startTime = null;
         }
     };
     self._elem.addEventListener('waiting', self._onWaiting);
@@ -78,7 +80,8 @@ VideoStream.prototype._createMuxer = function() {
         });
 
         if (self._waitingFired || self._elem.preload === 'auto') {
-            self._pump()
+            self._pump(self._startTime | 0);
+            self._startTime = null;
         }
     });
 
@@ -199,12 +202,16 @@ VideoStream.prototype.createWriteStream = function(obj) {
     return mediaSource;
 };
 
-VideoStream.prototype._pump = function() {
+VideoStream.prototype._pump = function(time) {
     try {
-        var time = this._elem.currentTime;
+        var video = this._elem;
+        if ((time | 0) > 0) {
+            video.currentTime = time;
+        }
+        time = video.currentTime;
 
-        if (!this.withinBufferedRange(time)) {
-            this._tryPump();
+        if (self._type !== 'WebM' || !this.withinBufferedRange(time)) {
+            this._tryPump(time);
         }
         else if (d) {
             console.debug('Ignoring pump within buffered range.', time);
@@ -215,19 +222,18 @@ VideoStream.prototype._pump = function() {
     }
 };
 
-VideoStream.prototype._tryPump = function() {
+VideoStream.prototype._tryPump = function(time) {
     var self = this;
     var video = self._elem;
     var muxer = self._muxer;
-    var currentTime = video.currentTime;
-    var muxed = muxer.seek(currentTime);
+    var muxed = muxer.seek(time);
     var timeStampFixup = muxer._seekTimeFixup;
 
     if (d) {
-        console.debug('Seeking to %s, fixup=%s', currentTime, timeStampFixup);
+        console.debug('Seeking to %s, fixup=%s', time, timeStampFixup);
     }
 
-    if (currentTime - timeStampFixup > .4 || timeStampFixup === 0) {
+    if (time - timeStampFixup > .4 || timeStampFixup === 0) {
         var i, m;
 
         if (self._seekCoercion === timeStampFixup) {
@@ -237,7 +243,7 @@ VideoStream.prototype._tryPump = function() {
         }
         else {
             if (d) {
-                console.debug('Applying timestamp fixup...', currentTime, timeStampFixup);
+                console.debug('Applying timestamp fixup...', time, timeStampFixup);
             }
 
             for (i = muxed.length; i--;) {
@@ -254,7 +260,7 @@ VideoStream.prototype._tryPump = function() {
             video.currentTime = timeStampFixup;
 
             if (!this.withinBufferedRange(timeStampFixup)) {
-                this._tryPump();
+                this._tryPump(timeStampFixup);
             }
             return;
         }
@@ -273,11 +279,11 @@ VideoStream.prototype._tryPump = function() {
                 if (sb) {
                     if (ms._type === 'audio/mpeg') {
                         // Needed for Chrome to allow seeking to work properly with raw mp3 streams
-                        sb.timestampOffset = currentTime;
+                        sb.timestampOffset = time;
                     }
 
                     if (timeStampFixup !== undefined) {
-                        self.removeBuffered(sb, currentTime);
+                        self.removeBuffered(sb, time);
                     }
                 }
             }

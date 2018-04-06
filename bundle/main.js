@@ -5,7 +5,8 @@ var MIN_CACHE = localStorage.minStreamingCache | 0 || (400 * 1048576);
 var REQUEST_SIZE = 4 * 1048576;
 var MAX_BUF_SECONDS = 25;
 
-var VideoStream = require('../');
+var VideoStream = require('../videostream');
+var AudioStream = require('../audiostream');
 var inherits = require('inherits');
 var Readable = require('readable-stream').Readable;
 var Buffer = require('buffer').Buffer;
@@ -378,6 +379,7 @@ VideoFile.prototype.fetch = function fetch(startpos, recycle) {
             }
 
             if (typeof self.data === 'string') {
+                data._ticket = self.data;
                 self.data = data;
             }
 
@@ -423,6 +425,9 @@ VideoFile.prototype.fetch = function fetch(startpos, recycle) {
                     console.warn('stream overquota, holding...', ev);
                 }
 
+                if (typeof self.data === 'object') {
+                    self.data = self.data._ticket;
+                }
                 self.overquota = true;
                 self.retryq.push(retry);
             }
@@ -516,28 +521,41 @@ function Streamer(data, video, options) {
 Streamer.prototype = Object.create(null);
 
 Streamer.prototype.init = function(data) {
-    if (!this.video) {
+    var self = this;
+
+    if (!self.video) {
         if (d) {
-            console.debug('Cannot initialize... already destroyed?', this);
+            console.debug('Cannot initialize... already destroyed?', self);
         }
         return;
     }
-    this.file = new VideoFile(data, this);
+    self.file = new VideoFile(data, self);
 
-    if (this.options.autoplay === false) {
-        this.file.minCache = 0x1000000;
+    if (self.options.autoplay === false) {
+        self.file.minCache = 0x1000000;
     }
     else {
-        this.video.setAttribute('autoplay', true);
+        self.video.setAttribute('autoplay', true);
     }
 
-    var videoStreamOptions = {
-        sbflush: this.sbflush,
-        type: this.options.type,
+    var options = Object.assign(self.options, {
+        sbflush: self.sbflush,
         bufferDuration: MAX_BUF_SECONDS * 1.8
-    };
-    this.stream = new VideoStream(this.file.fetch(0), this.video, videoStreamOptions);
-    this.file._vs = this.stream;
+    });
+
+    if (options.type === 'MPEG Audio') {
+        self.stream = new AudioStream(self.file.fetch(0), self.video, options);
+
+        ['error', 'audio-buffer'].forEach(function(ev) {
+            self.stream.on(ev, function(a) {
+                self.notify(ev, a);
+            });
+        });
+    }
+    else {
+        self.stream = new VideoStream(self.file.fetch(0), self.video, options);
+    }
+    self.file._vs = self.stream;
 };
 
 Streamer.prototype.initTypeGuess = function(data) {
@@ -551,10 +569,14 @@ Streamer.prototype.initTypeGuess = function(data) {
     file.fetcher(data, 0, 4)
         .then(function(chunk) {
             var dv = new DataView(chunk.buffer);
+            var long = dv.getUint32(0, false);
             delete chunk.buffer;
 
-            if (dv.getUint32(0, false) === 0x1A45DFA3) {
+            if (long === 0x1A45DFA3) {
                 self.options.type = 'WebM';
+            }
+            else if ((long >> 8) === 0x494433) {
+                self.options.type = 'MPEG Audio';
             }
             init(typeof data === 'string' ? chunk : data);
         })
@@ -925,7 +947,7 @@ Streamer.getThumbnail = function(data) {
 
         s.on('playing', function() {
             if (!++step) {
-                video.currentTime = 20 * (video.duration | 0) / 100;
+                this.currentTime = 20 * (video.duration | 0) / 100;
                 return true;
             }
 
@@ -936,9 +958,33 @@ Streamer.getThumbnail = function(data) {
     });
 };
 
+Object.defineProperty(Streamer.prototype, 'currentTime', {
+    get: function() {
+        var video = this.video || false;
+        var stream = this.stream || false;
+
+        if (stream instanceof AudioStream) {
+            return stream.currentTime;
+        }
+
+        return video.currentTime;
+    },
+    set: function(v) {
+        var video = this.video || false;
+        var stream = this.stream || false;
+
+        if (stream instanceof AudioStream) {
+            stream._play(v);
+        }
+        else {
+            video.currentTime = v;
+        }
+    }
+});
+
 Object.defineProperty(Streamer.prototype, 'hasAudio', {
     get: function() {
-        return this.stream && Object(this.stream._muxer)._hasAudio;
+        return this.stream && (Object(this.stream._muxer)._hasAudio || this.stream._hasAudio);
     }
 });
 

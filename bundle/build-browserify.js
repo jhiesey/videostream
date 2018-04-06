@@ -211,6 +211,13 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
         chunk = chunk.replace('_uint8ArrayToBuffer', 'Buffer.from');
     }
 
+    // Revert mp4-box-encoding 1.1.3 & mp4-stream 2.0.3 useless buffer-alloc/from dependency addition
+    if (this.filename.indexOf('mp4-stream') > 0 || this.filename.indexOf('mp4-box-encoding') > 0) {
+        chunk = chunk.replace(/var \w+ = require\('buffer-(?:alloc|from)'\)/g, '');
+        chunk = chunk.replace(/\bbufferAlloc\b/g, 'Buffer.allocUnsafe');
+        chunk = chunk.replace(/\bbufferFrom\b/g, 'Buffer.from');
+    }
+
     // Replace references to process.* and explicitly include Buffer to prevent a closure
     if (this.filename.indexOf('mp4-stream/encode.js') > 0) {
         chunk = chunk.replace('return process.nextTick', 'return nextTick');
@@ -268,7 +275,7 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
     chunk = chunk.replace(/^\s*debug\(.*\);$/gm, '');
 
     // Let's remove dead code and such...
-    const uglify = 10&&UglifyJS.minify(chunk, {
+    const uglify = UglifyJS.minify(chunk, {
         warnings: true,
         mangle: {
             keep_fnames: true

@@ -31,15 +31,11 @@ var utils = {
             onNextTick(cb);
         }
     },
-    inherit: function(ctor, superCtor) {
-        ctor.super_ = superCtor;
-        ctor.prototype = Object.create(superCtor.prototype, {
-            constructor: {
-                value: ctor,
-                enumerable: false,
-                writable: true,
-                configurable: true
-            }
+    inherit: function(target, source) {
+        target.prototype = Object.create(source && source.prototype || source);
+        Object.defineProperty(target.prototype, 'constructor', {
+            value: target,
+            enumerable: false
         });
     },
     deprecate: function(cb, msg) {
