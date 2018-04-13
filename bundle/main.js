@@ -481,13 +481,14 @@ function Streamer(data, video, options) {
     if (!(this instanceof Streamer)) {
         return new Streamer(data, video, options);
     }
+    this.gecko = uad.engine === 'Gecko';
     this.options = Object.assign(Object.create(null), {autoplay: true}, options);
 
     this._events = [
         'progress', 'timeupdate', 'canplay', 'pause', 'playing', 'error',
         'abort', 'updateend', 'ended', 'stalled', 'suspend'
     ];
-    if (video.parentNode && uad.engine === 'Gecko' && parseInt(uad.version) < 57) {
+    if (video.parentNode && this.gecko && parseInt(uad.version) < 57) {
         this.sbflush = true;
         this._events.push('seeking');
         this.WILL_AUTOPLAY_ONSEEK = true;
@@ -503,6 +504,7 @@ function Streamer(data, video, options) {
     this.inactivity = false;
     this.activitimer = null;
     this.evs = Object.create(null);
+    this.presentationOffset = 0;
 
     if (this.options.type === undefined) {
         // No type given, try to guess if that's a webm otherwise it'll fallback to mp4
@@ -543,7 +545,7 @@ Streamer.prototype.init = function(data) {
         bufferDuration: MAX_BUF_SECONDS * 1.8
     });
 
-    if (options.type === 'MPEG Audio') {
+    if (this.goAudioStream) {
         self.stream = new AudioStream(self.file.fetch(0), self.video, options);
 
         ['error', 'audio-buffer'].forEach(function(ev) {
@@ -554,6 +556,39 @@ Streamer.prototype.init = function(data) {
     }
     else {
         self.stream = new VideoStream(self.file.fetch(0), self.video, options);
+
+        if (self.gecko) {
+            // Listen for the first stalled event...
+            // ...in a lame attempt to workaround https://bugzilla.mozilla.org/show_bug.cgi?id=1350056
+            // TODO: fix the mp4 remuxer instead...
+
+            var waiting = false;
+            (function _() {
+                if (waiting) {
+                    return;
+                }
+                waiting = true;
+
+                self.on('stalled', function() {
+                    var stream = this.stream;
+                    var range = stream.getBufferedRange();
+
+                    if (d) {
+                        console.log('First range on stalled', range, this.timeupdate);
+                    }
+
+                    if (!this.timeupdate && range[0] > 1) {
+                        console.warn('Applying presentation timestamp fixup...', range);
+                        this.presentationOffset = range[0];
+                        this.currentTime = 0;
+                    }
+
+                    waiting = !range;
+                    return waiting;
+                });
+                self.on('ended', _);
+            })();
+        }
     }
     self.file._vs = self.stream;
 };
@@ -566,7 +601,7 @@ Streamer.prototype.initTypeGuess = function(data) {
         self.init(data);
     };
 
-    file.fetcher(data, 0, 4)
+    file.fetcher(data, 0, 16)
         .then(function(chunk) {
             var dv = new DataView(chunk.buffer);
             var long = dv.getUint32(0, false);
@@ -577,6 +612,15 @@ Streamer.prototype.initTypeGuess = function(data) {
             }
             else if ((long >> 8) === 0x494433) {
                 self.options.type = 'MPEG Audio';
+            }
+            else if (long === 0x4F676753) {
+                self.options.type = 'Ogg';
+            }
+            else if (dv.getUint32(8, false) === 0x4D344120) {
+                self.options.type = 'M4A ';
+            }
+            else if (dv.getUint32(8, false) === 0x57415645) {
+                self.options.type = 'Wave';
             }
             init(typeof data === 'string' ? chunk : data);
         })
@@ -958,6 +1002,13 @@ Streamer.getThumbnail = function(data) {
     });
 };
 
+Object.defineProperty(Streamer.prototype, 'duration', {
+    get: function() {
+        var video = this.video || false;
+        return (video.duration - this.presentationOffset) | 0;
+    }
+});
+
 Object.defineProperty(Streamer.prototype, 'currentTime', {
     get: function() {
         var video = this.video || false;
@@ -967,7 +1018,7 @@ Object.defineProperty(Streamer.prototype, 'currentTime', {
             return stream.currentTime;
         }
 
-        return video.currentTime;
+        return video.currentTime - this.presentationOffset;
     },
     set: function(v) {
         var video = this.video || false;
@@ -977,8 +1028,21 @@ Object.defineProperty(Streamer.prototype, 'currentTime', {
             stream._play(v);
         }
         else {
-            video.currentTime = v;
+            video.currentTime = v + this.presentationOffset;
         }
+    }
+});
+
+Object.defineProperty(Streamer.prototype, 'goAudioStream', {
+    get: function() {
+        var options = this.options || false;
+        var type = options.type;
+
+        if (type === 'M4A ') {
+            return mega.fullAudioContextSupport;
+        }
+
+        return type === 'MPEG Audio' || type === 'Wave' || type === 'Ogg';
     }
 });
 
