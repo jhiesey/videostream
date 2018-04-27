@@ -109,7 +109,7 @@ function RunLengthIndex (entries, countName) {
 	self._index = 0
 	self._offset = 0
 
-	self.value = self._entries[0]
+	self.value = self._entries[0] || false;
 }
 
 RunLengthIndex.prototype.inc = function () {
@@ -120,7 +120,7 @@ RunLengthIndex.prototype.inc = function () {
 		self._offset = 0
 	}
 
-	self.value = self._entries[self._index]
+	self.value = self._entries[self._index] || false;
 }
 
 MP4Remuxer.prototype._processMoov = function (moov) {
@@ -216,8 +216,8 @@ MP4Remuxer.prototype._processMoov = function (moov) {
 			var size = stbl.stsz.entries[sample]
 
 			// Compute time data
-			var duration = decodingTimeEntry.value.duration
-			var presentationOffset = presentationOffsetEntry ? presentationOffsetEntry.value.compositionOffset : 0
+			var duration = decodingTimeEntry.value && decodingTimeEntry.value.duration || 0;
+			var presentationOffset = presentationOffsetEntry && presentationOffsetEntry.value.compositionOffset || 0;
 
 			// Compute sync
 			var sync = true
