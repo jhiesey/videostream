@@ -4,6 +4,7 @@ var inherits = require('inherits')
 var mp4 = require('mp4-stream')
 var Box = require('mp4-box-encoding')
 var RangeSliceStream = require('range-slice-stream')
+var concat = require('simple-concat')
 
 module.exports = MP4Remuxer
 
@@ -315,11 +316,27 @@ MP4Remuxer.prototype.seek = function (time) {
 
 		function writeFragment (frag) {
 			if (outStream.destroyed) return
+			self._busy = true
 			outStream.box(frag.moof, function (err) {
 				if (err) return self.emit('error', err)
 				if (outStream.destroyed) return
 				var slicedStream = track.inStream.slice(frag.ranges)
-				slicedStream.pipe(outStream.mediaData(frag.length, function (err) {
+
+				// streaming mode
+				slicedStream.pipe(outStream.mediaData(frag.length, writeDone))
+
+				// block mode
+				// concat(slicedStream, function (err, buf) {
+				// 	if (err || outStream.destroyed) return writeDone(err)
+				// 	outStream.box({
+				// 		type: 'mdat',
+				// 		contentLength: frag.length,
+				// 		buffer: buf
+				// 	}, writeDone)
+				// })
+
+				function writeDone (err) {
+					self._busy = false
 					if (err) return self.emit('error', err)
 					if (outStream.destroyed) return
 					var nextFrag = self._generateFragment(i)
@@ -327,7 +344,7 @@ MP4Remuxer.prototype.seek = function (time) {
 						return outStream.finalize()
 					}
 					writeFragment(nextFrag)
-				}))
+				}
 			})
 		}
 	})
