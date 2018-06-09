@@ -34,6 +34,8 @@ function VideoStream (file, mediaElem, opts) {
 			self._pump()
 		}
 	}
+	if(self._elem.autoplay)
+		self._elem.preload = "auto";
 	self._elem.addEventListener('waiting', self._onWaiting)
 	self._elem.addEventListener('error', self._onError)
 }
