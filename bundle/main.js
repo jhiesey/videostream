@@ -409,7 +409,7 @@ VideoFile.prototype.fetch = function fetch(startpos, recycle) {
             delete self.fetching[pos];
 
             var retry = function() {
-                setImmediate(self.fetch.bind(self, startpos, recycle));
+                window.setImmediate(self.fetch.bind(self, startpos, recycle));
             };
 
             if (typeof ev === 'number') {
@@ -1049,6 +1049,12 @@ Object.defineProperty(Streamer.prototype, 'goAudioStream', {
 Object.defineProperty(Streamer.prototype, 'hasAudio', {
     get: function() {
         return this.stream && (Object(this.stream._muxer)._hasAudio || this.stream._hasAudio);
+    }
+});
+
+Object.defineProperty(Streamer.prototype, 'hasUnsupportedAudio', {
+    get: function() {
+        return this.stream && Object(this.stream._muxer)._hasUnsupportedAudio;
     }
 });
 

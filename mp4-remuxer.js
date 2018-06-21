@@ -152,7 +152,7 @@ MP4Remuxer.prototype._processMoov = function (moov) {
             }
             self._hasVideo = codec;
         }
-        else if (!self._hasAudio && handlerType === 'soun' && (stsdEntry.type === 'mp4a' || stsdEntry.type === 'fLaC')) {
+        else if (!self._hasAudio && handlerType === 'soun') {
             mime = 'audio/mp4; codecs="%"';
             if (stsdEntry.type === 'mp4a') {
                 codec = 'mp4a'
@@ -165,9 +165,12 @@ MP4Remuxer.prototype._processMoov = function (moov) {
                     codec = 'mp3'
                 }
             }
-            else {
+            else if (stsdEntry.type === 'fLaC') {
                 codec = 'flac';
 			}
+            else {
+                codec = stsdEntry.type;
+            }
             mime = mime.replace('%', codec);
             if (d) {
                 console.debug(mime);
@@ -175,6 +178,7 @@ MP4Remuxer.prototype._processMoov = function (moov) {
             if (!MediaSource.isTypeSupported(mime)) {
                 if (codec !== 'mp3' || !MediaSource.isTypeSupported(mime = 'audio/mpeg')) {
                     // Let's continue without audio if actually unsupported, e.g. mp4a.6B (MP3)
+                    self._hasUnsupportedAudio = codec;
                     continue;
                 }
             }
