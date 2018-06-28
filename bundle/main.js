@@ -1002,6 +1002,22 @@ Streamer.getThumbnail = function(data) {
     });
 };
 
+Streamer.prototype.getProperty = function(key) {
+    var file = this.file || false;
+
+    switch (key) {
+        case 'server':
+            var data = file.data;
+            var url = data && data.g;
+            return url && String(url).split('//').pop().split('.')[0] || false;
+
+        case 'bitrate':
+            return (file.filesize / this.duration) || false;
+    }
+
+    return false;
+};
+
 Object.defineProperty(Streamer.prototype, 'duration', {
     get: function() {
         var video = this.video || false;
