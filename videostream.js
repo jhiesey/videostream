@@ -115,7 +115,9 @@ VideoStream.prototype.destroy = function () {
 
 	if (self._tracks) {
 		self._tracks.forEach(function (track) {
-			track.muxed.destroy()
+			if (track.muxed) {
+				track.muxed.destroy()
+			}
 		})
 	}
 
