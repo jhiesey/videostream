@@ -817,15 +817,16 @@ Streamer.prototype.play = function() {
     // Some browsers, such as Chrome Android, will throw:
     // Failed to execute 'play' on 'HTMLMediaElement': API can only be initiated by a user gesture.
     try {
-        var video = this.video;
+        var self = this;
+        var video = self.video;
         var promise = video.play();
 
         if (typeof Promise !== 'undefined' && promise instanceof Promise) {
             promise.then(function() {
                 if (d) {
                     console.debug('Playing, current time: %s, duration: %s',
-                        secondsToTime(video.currentTime),
-                        secondsToTime(video.duration));
+                        secondsToTime(self.currentTime),
+                        secondsToTime(self.duration));
                 }
             }).catch(function(ex) {
                 if (d) {
@@ -1041,7 +1042,9 @@ Object.defineProperty(Streamer.prototype, 'currentTime', {
         var stream = this.stream || false;
 
         if (stream instanceof AudioStream) {
+            stream._stop();
             stream._play(v);
+            this.play();
         }
         else {
             video.currentTime = v + this.presentationOffset;

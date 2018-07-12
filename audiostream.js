@@ -186,6 +186,11 @@ AudioStream.prototype._play = function(time) {
 
     // log('play', time, audioSource, context);
 
+    if (!audioBuffer) {
+        log('Cannot play, audio buffer not yet ready.');
+        return;
+    }
+
     source.buffer = audioBuffer;
     source.connect(self._audioAnalyser);
     source.connect(self._audioStream);
