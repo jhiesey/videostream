@@ -433,8 +433,11 @@ MP4Remuxer.prototype._generateMoof = function (track, firstSample, lastSample) {
 	var currTrack = self._tracks[track]
 
 	var entries = []
+	var trunVersion = 0
 	for (var j = firstSample; j < lastSample; j++) {
 		var currSample = currTrack.samples[j]
+		if (currSample.presentationOffset < 0)
+			trunVersion = 1
 		entries.push({
 			sampleDuration: currSample.duration,
 			sampleSize: currSample.size,
@@ -459,7 +462,8 @@ MP4Remuxer.prototype._generateMoof = function (track, firstSample, lastSample) {
 			trun: {
 				flags: 0xf01,
 				dataOffset: 8, // The moof size has to be added to this later as well
-				entries: entries
+				entries: entries,
+				version: trunVersion
 			}
 		}]
 	}
