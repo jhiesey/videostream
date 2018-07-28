@@ -146,13 +146,14 @@ MP4Remuxer.prototype._processMoov = function (moov) {
 			}
 
 			// Create new sample entry
+			var chunkOffsetTable = stbl.stco || stbl.co64
 			samples.push({
 				size: size,
 				duration: duration,
 				dts: dts,
 				presentationOffset: presentationOffset,
 				sync: sync,
-				offset: offsetInChunk + stbl.stco.entries[chunk]
+				offset: offsetInChunk + chunkOffsetTable.entries[chunk]
 			})
 
 			// Go to next sample
