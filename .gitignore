@@ -1,5 +1,5 @@
 .DS_Store
 built.js
-sintel.mp4
+example/*.mp4
 
 node_modules
