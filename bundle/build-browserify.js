@@ -212,7 +212,10 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
     }
 
     // Revert mp4-box-encoding 1.1.3 & mp4-stream 2.0.3 useless buffer-alloc/from dependency addition
-    if (this.filename.indexOf('mp4-stream') > 0 || this.filename.indexOf('mp4-box-encoding') > 0) {
+    if (this.filename.indexOf('mp4-stream') > 0
+        || this.filename.indexOf('uint64be/index.j') > 0 // 2.0.2
+        || this.filename.indexOf('mp4-box-encoding') > 0) {
+
         chunk = chunk.replace(/var \w+ = require\('buffer-(?:alloc|from)'\)/g, '');
         chunk = chunk.replace(/\bbufferAlloc\b/g, 'Buffer.allocUnsafe');
         chunk = chunk.replace(/\bbufferFrom\b/g, 'Buffer.from');

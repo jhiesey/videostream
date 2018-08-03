@@ -610,7 +610,7 @@ MP4Remuxer.prototype._generateMoof = function (track, firstSample, lastSample) {
 var UINT32_MAX = Math.pow(2, 32);
 
 Box.boxes.fullBoxes.co64 = true;
-Box.boxes.co64 = {};
+Box.boxes.co64 = Box.boxes.co64 || {};
 Box.boxes.co64.decode = function(buf, offset) {
     buf = buf.slice(offset);
     var num = buf.readUInt32BE(0);
