@@ -262,7 +262,14 @@ VideoFile.prototype.cacheadd = function cacheadd(pos, data) {
 };
 
 VideoFile.prototype.fetcher = function(data, byteOffset, byteLength) {
-    return M.gfsfetch(data, byteOffset, byteLength);
+    return new MegaPromise(function(resolve, reject) {
+        M.gfsfetch(data, byteOffset, byteLength).fail(reject).done(function(data) {
+            var buffer = data.buffer;
+            delete data.buffer;
+
+            resolve(data, buffer);
+        });
+    });
 };
 
 VideoFile.prototype.fileReader = function(data, byteOffset, byteLength) {
@@ -369,9 +376,8 @@ VideoFile.prototype.fetch = function fetch(startpos, recycle) {
     }
 
     this.fetcher(this.data, pos, pos + length)
-        .then(function(data) {
-            var buffer = data.buffer;
-            delete data.buffer;
+        .then(function(data, buffer) {
+            buffer = buffer || data.buffer;
 
             if (self.mru === undefined) {
                 // destroyed while loading
@@ -800,7 +806,7 @@ Streamer.prototype.handleEvent = function(ev) {
         if (ev.type === 'error') {
             var mediaError = target.error || false;
             var streamError = this.stream._elemWrapper.detailedError;
-            error = streamError || mediaError.message;
+            error = streamError && streamError.message || mediaError.message;
 
             if (mediaError.code) {
                 console.warn('MediaError %s', mediaError.code, mediaError.message);
