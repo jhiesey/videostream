@@ -267,7 +267,7 @@ VideoFile.prototype.fetcher = function(data, byteOffset, byteLength) {
             var buffer = data.buffer;
             delete data.buffer;
 
-            resolve(data, buffer);
+            resolve([data, buffer]);
         });
     });
 };
@@ -376,8 +376,13 @@ VideoFile.prototype.fetch = function fetch(startpos, recycle) {
     }
 
     this.fetcher(this.data, pos, pos + length)
-        .then(function(data, buffer) {
-            buffer = buffer || data.buffer;
+        .then(function(data) {
+            var buffer = data.buffer;
+
+            if (Array.isArray(data)) {
+                buffer = data[1];
+                data = data[0];
+            }
 
             if (self.mru === undefined) {
                 // destroyed while loading
