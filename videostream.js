@@ -1,12 +1,12 @@
-var MediaElementWrapper = require('mediasource')
-var pump = require('pump')
+const MediaElementWrapper = require('mediasource');
+const pump = require('pump');
 
-var MP4Remuxer = require('./mp4-remuxer')
+const MP4Remuxer = require('./mp4-remuxer');
 
 module.exports = VideoStream
 
 function VideoStream (file, mediaElem, opts) {
-	var self = this
+	const self = this;
 	if (!(this instanceof VideoStream)) return new VideoStream(file, mediaElem, opts)
 	opts = opts || {}
 
@@ -22,11 +22,11 @@ function VideoStream (file, mediaElem, opts) {
 		self._createMuxer()
 	}
 
-	self._onError = function (err) {
+	self._onError = err => {
 		self.detailedError = self._elemWrapper.detailedError
 		self.destroy() // don't pass err though so the user doesn't need to listen for errors
 	}
-	self._onWaiting = function () {
+	self._onWaiting = () => {
 		self._waitingFired = true
 		if (!self._muxer) {
 			self._createMuxer()
@@ -41,21 +41,21 @@ function VideoStream (file, mediaElem, opts) {
 }
 
 VideoStream.prototype._createMuxer = function () {
-	var self = this
+	const self = this;
 	self._muxer = new MP4Remuxer(self._file)
-	self._muxer.on('ready', function (data) {
-		self._tracks = data.map(function (trackData) {
-			var mediaSource = self._elemWrapper.createWriteStream(trackData.mime)
-			mediaSource.on('error', function (err) {
+	self._muxer.on('ready', data => {
+		self._tracks = data.map(trackData => {
+			const mediaSource = self._elemWrapper.createWriteStream(trackData.mime);
+			mediaSource.on('error', err => {
 				self._elemWrapper.error(err)
 			})
-			var track = {
+			const track = {
 				muxed: null,
-				mediaSource: mediaSource,
+				mediaSource,
 				initFlushed: false,
 				onInitFlushed: null
-			}
-			mediaSource.write(trackData.init, function (err) {
+			};
+			mediaSource.write(trackData.init, err => {
 				track.initFlushed = true
 				if (track.onInitFlushed) {
 					track.onInitFlushed(err)
@@ -69,30 +69,30 @@ VideoStream.prototype._createMuxer = function () {
 		}
 	})
 
-	self._muxer.on('error', function (err) {
+	self._muxer.on('error', err => {
 		self._elemWrapper.error(err)
 	})
 }
 
 VideoStream.prototype._pump = function () {
-	var self = this
+	const self = this;
 
-	var muxed = self._muxer.seek(self._elem.currentTime, !self._tracks)
+	const muxed = self._muxer.seek(self._elem.currentTime, !self._tracks);
 
-	self._tracks.forEach(function (track, i) {
-		var pumpTrack = function () {
+	self._tracks.forEach((track, i) => {
+		const pumpTrack = () => {
 			if (track.muxed) {
 				track.muxed.destroy()
 				track.mediaSource = self._elemWrapper.createWriteStream(track.mediaSource)
-				track.mediaSource.on('error', function (err) {
+				track.mediaSource.on('error', err => {
 					self._elemWrapper.error(err)
 				})
 			}
 			track.muxed = muxed[i]
 			pump(track.muxed, track.mediaSource)
-		}
+		};
 		if (!track.initFlushed) {
-			track.onInitFlushed = function (err) {
+			track.onInitFlushed = err => {
 				if (err) {
 					self._elemWrapper.error(err)
 					return
@@ -106,7 +106,7 @@ VideoStream.prototype._pump = function () {
 }
 
 VideoStream.prototype.destroy = function () {
-	var self = this
+	const self = this;
 	if (self.destroyed) {
 		return
 	}
@@ -116,7 +116,7 @@ VideoStream.prototype.destroy = function () {
 	self._elem.removeEventListener('error', self._onError)
 
 	if (self._tracks) {
-		self._tracks.forEach(function (track) {
+		self._tracks.forEach(track => {
 			if (track.muxed) {
 				track.muxed.destroy()
 			}
