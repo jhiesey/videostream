@@ -18,25 +18,25 @@ Support for most other formats will take significant work.
 
 Videostream just exports a function. Use it like this:
 
-``` js
-var exampleFile = {
+```js
+const exampleFile = {
 	createReadStream: function (opts) {
-		var start = opts.start;
-		var end = opts.end;
+		const start = opts.start;
+		const end = opts.end;
 		// Return a readable stream that provides the bytes
 		// between offsets "start" and "end" inclusive
 	}
 }
 
-var VideoStream = require('videostream');
+const VideoStream = require('videostream');
 
-var elem = document.createElement('video');
-var videostream = VideoStream(exampleFile, elem);
+const elem = document.createElement('video');
+const videostream = VideoStream(exampleFile, elem);
 
-elem.addEventListener('error', function () {
+elem.addEventListener('error', () => {
   // listen for errors on the video/audio element directly
-  var errorCode = elem.error
-  var detailedError = videostream.detailedError
+  const errorCode = elem.error
+  const detailedError = videostream.detailedError
   // videostream.detailedError will often have a more detailed error message
 })
 ```
