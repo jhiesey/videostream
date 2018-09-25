@@ -16,43 +16,39 @@ class MP4Remuxer extends EventEmitter {
   }
 
   _findMoov (offset) {
-    const self = this
-
-    if (self._decoder) {
-      self._decoder.destroy()
+    if (this._decoder) {
+      this._decoder.destroy()
     }
 
-    self._decoder = mp4.decode()
-    const fileStream = self._file.createReadStream({
+    this._decoder = mp4.decode()
+    const fileStream = this._file.createReadStream({
       start: offset
     })
-    fileStream.pipe(self._decoder)
+    fileStream.pipe(this._decoder)
 
-    self._decoder.once('box', headers => {
+    this._decoder.once('box', headers => {
       if (headers.type === 'moov') {
-        self._decoder.decode(moov => {
+        this._decoder.decode(moov => {
           fileStream.destroy()
           try {
-            self._processMoov(moov)
+            this._processMoov(moov)
           } catch (err) {
             err.message = `Cannot parse mp4 file: ${err.message}`
-            self.emit('error', err)
+            this.emit('error', err)
           }
         })
       } else {
         fileStream.destroy()
-        self._findMoov(offset + headers.length)
+        this._findMoov(offset + headers.length)
       }
     })
   }
 
   _processMoov (moov) {
-    const self = this
-
     const traks = moov.traks
-    self._tracks = []
-    self._hasVideo = false
-    self._hasAudio = false
+    this._tracks = []
+    this._hasVideo = false
+    this._hasAudio = false
     for (let i = 0; i < traks.length; i++) {
       const trak = traks[i]
       const stbl = trak.mdia.minf.stbl
@@ -61,20 +57,20 @@ class MP4Remuxer extends EventEmitter {
       let codec
       let mime
       if (handlerType === 'vide' && stsdEntry.type === 'avc1') {
-        if (self._hasVideo) {
+        if (this._hasVideo) {
           continue
         }
-        self._hasVideo = true
+        this._hasVideo = true
         codec = 'avc1'
         if (stsdEntry.avcC) {
           codec += `.${stsdEntry.avcC.mimeCodec}`
         }
         mime = `video/mp4; codecs="${codec}"`
       } else if (handlerType === 'soun' && stsdEntry.type === 'mp4a') {
-        if (self._hasAudio) {
+        if (this._hasAudio) {
           continue
         }
-        self._hasAudio = true
+        this._hasAudio = true
         codec = 'mp4a'
         if (stsdEntry.esds && stsdEntry.esds.mimeCodec) {
           codec += `.${stsdEntry.esds.mimeCodec}`
@@ -207,7 +203,7 @@ class MP4Remuxer extends EventEmitter {
         }
       }
 
-      self._tracks.push({
+      this._tracks.push({
         trackId: trak.tkhd.trackId,
         timeScale: trak.mdia.mdhd.timeScale,
         samples,
@@ -218,15 +214,15 @@ class MP4Remuxer extends EventEmitter {
       })
     }
 
-    if (self._tracks.length === 0) {
-      self.emit('error', new Error('no playable tracks'))
+    if (this._tracks.length === 0) {
+      this.emit('error', new Error('no playable tracks'))
       return
     }
 
     // Must be set last since this is used above
     moov.mvhd.duration = 0
 
-    self._ftyp = {
+    this._ftyp = {
       type: 'ftyp',
       brand: 'iso5',
       brandVersion: 0,
@@ -235,8 +231,8 @@ class MP4Remuxer extends EventEmitter {
       ]
     }
 
-    const ftypBuf = Box.encode(self._ftyp)
-    const data = self._tracks.map(track => {
+    const ftypBuf = Box.encode(this._ftyp)
+    const data = this._tracks.map(track => {
       const moovBuf = Box.encode(track.moov)
       return {
         mime: track.mime,
@@ -244,22 +240,21 @@ class MP4Remuxer extends EventEmitter {
       }
     })
 
-    self.emit('ready', data)
+    this.emit('ready', data)
   }
 
   seek (time) {
-    const self = this
-    if (!self._tracks) {
+    if (!this._tracks) {
       throw new Error('Not ready yet; wait for \'ready\' event')
     }
 
-    if (self._fileStream) {
-      self._fileStream.destroy()
-      self._fileStream = null
+    if (this._fileStream) {
+      this._fileStream.destroy()
+      this._fileStream = null
     }
 
     let startOffset = -1
-    self._tracks.map((track, i) => {
+    this._tracks.map((track, i) => {
       // find the keyframe before the time
       // stream from there
       if (track.outStream) {
@@ -270,7 +265,7 @@ class MP4Remuxer extends EventEmitter {
         track.inStream = null
       }
       const outStream = track.outStream = mp4.encode()
-      const fragment = self._generateFragment(i, time)
+      const fragment = this._generateFragment(i, time)
       if (!fragment) {
         return outStream.finalize()
       }
@@ -284,13 +279,13 @@ class MP4Remuxer extends EventEmitter {
       function writeFragment (frag) {
         if (outStream.destroyed) return
         outStream.box(frag.moof, err => {
-          if (err) return self.emit('error', err)
+          if (err) return this.emit('error', err)
           if (outStream.destroyed) return
           const slicedStream = track.inStream.slice(frag.ranges)
           slicedStream.pipe(outStream.mediaData(frag.length, err => {
-            if (err) return self.emit('error', err)
+            if (err) return this.emit('error', err)
             if (outStream.destroyed) return
-            const nextFrag = self._generateFragment(i)
+            const nextFrag = this._generateFragment(i)
             if (!nextFrag) {
               return outStream.finalize()
             }
@@ -301,11 +296,11 @@ class MP4Remuxer extends EventEmitter {
     })
 
     if (startOffset >= 0) {
-      const fileStream = self._fileStream = self._file.createReadStream({
+      const fileStream = this._fileStream = this._file.createReadStream({
         start: startOffset
       })
 
-      self._tracks.forEach(track => {
+      this._tracks.forEach(track => {
         track.inStream = new RangeSliceStream(startOffset, {
           // Allow up to a 10MB offset between audio and video,
           // which should be fine for any reasonable interleaving
@@ -316,15 +311,13 @@ class MP4Remuxer extends EventEmitter {
       })
     }
 
-    return self._tracks.map(track => {
+    return this._tracks.map(track => {
       return track.outStream
     })
   }
 
   _findSampleBefore (trackInd, time) {
-    const self = this
-
-    const track = self._tracks[trackInd]
+    const track = this._tracks[trackInd]
     const scaledTime = Math.floor(track.timeScale * time)
     let sample = bs(track.samples, scaledTime, (sample, t) => {
       const pts = sample.dts + sample.presentationOffset// - track.editShift
@@ -344,16 +337,15 @@ class MP4Remuxer extends EventEmitter {
   }
 
   _generateFragment (track, time) {
-    const self = this
     /*
         1. Find correct sample
         2. Process backward until sync sample found
         3. Process forward until next sync sample after MIN_FRAGMENT_DURATION found
         */
-    const currTrack = self._tracks[track]
+    const currTrack = this._tracks[track]
     let firstSample
     if (time !== undefined) {
-      firstSample = self._findSampleBefore(track, time)
+      firstSample = this._findSampleBefore(track, time)
     } else {
       firstSample = currTrack.currSample
     }
@@ -386,16 +378,14 @@ class MP4Remuxer extends EventEmitter {
     currTrack.currSample = currSample
 
     return {
-      moof: self._generateMoof(track, firstSample, currSample),
+      moof: this._generateMoof(track, firstSample, currSample),
       ranges,
       length: totalLen
     }
   }
 
   _generateMoof (track, firstSample, lastSample) {
-    const self = this
-
-    const currTrack = self._tracks[track]
+    const currTrack = this._tracks[track]
 
     const entries = []
     let trunVersion = 0
@@ -413,7 +403,7 @@ class MP4Remuxer extends EventEmitter {
     const moof = {
       type: 'moof',
       mfhd: {
-        sequenceNumber: self._fragmentSequence++
+        sequenceNumber: this._fragmentSequence++
       },
       trafs: [{
         tfhd: {
@@ -441,24 +431,22 @@ class MP4Remuxer extends EventEmitter {
 
 class RunLengthIndex {
   constructor (entries, countName) {
-    const self = this
-    self._entries = entries
-    self._countName = countName || 'count'
-    self._index = 0
-    self._offset = 0
+    this._entries = entries
+    this._countName = countName || 'count'
+    this._index = 0
+    this._offset = 0
 
-    self.value = self._entries[0]
+    this.value = this._entries[0]
   }
 
   inc () {
-    const self = this
-    self._offset++
-    if (self._offset >= self._entries[self._index][self._countName]) {
-      self._index++
-      self._offset = 0
+    this._offset++
+    if (this._offset >= this._entries[this._index][this._countName]) {
+      this._index++
+      this._offset = 0
     }
 
-    self.value = self._entries[self._index]
+    this.value = this._entries[this._index]
   }
 }
 
