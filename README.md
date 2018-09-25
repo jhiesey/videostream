@@ -21,17 +21,17 @@ Videostream just exports a function. Use it like this:
 ```js
 const exampleFile = {
 	createReadStream: function (opts) {
-		const start = opts.start;
-		const end = opts.end;
+		const start = opts.start
+		const end = opts.end
 		// Return a readable stream that provides the bytes
 		// between offsets "start" and "end" inclusive
 	}
 }
 
-const VideoStream = require('videostream');
+const VideoStream = require('videostream')
 
-const elem = document.createElement('video');
-const videostream = new VideoStream(exampleFile, elem);
+const elem = document.createElement('video')
+const videostream = new VideoStream(exampleFile, elem)
 
 elem.addEventListener('error', () => {
   // listen for errors on the video/audio element directly
