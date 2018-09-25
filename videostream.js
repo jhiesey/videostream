@@ -3,47 +3,51 @@ const pump = require('pump');
 
 const MP4Remuxer = require('./mp4-remuxer');
 
+module.exports = VideoStream
+
 function VideoStream (file, mediaElem, opts) {
+	const self = this;
 	if (!(this instanceof VideoStream)) return new VideoStream(file, mediaElem, opts)
 	opts = opts || {}
 
-	this.detailedError = null
+	self.detailedError = null
 
-	this._elem = mediaElem
-	this._elemWrapper = new MediaElementWrapper(mediaElem)
-	this._waitingFired = false
-	this._trackMeta = null
-	this._file = file
-	this._tracks = null
-	if (this._elem.preload !== 'none') {
-		this._createMuxer()
+	self._elem = mediaElem
+	self._elemWrapper = new MediaElementWrapper(mediaElem)
+	self._waitingFired = false
+	self._trackMeta = null
+	self._file = file
+	self._tracks = null
+	if (self._elem.preload !== 'none') {
+		self._createMuxer()
 	}
 
-	this._onError = err => {
-		this.detailedError = this._elemWrapper.detailedError
-		this.destroy() // don't pass err though so the user doesn't need to listen for errors
+	self._onError = err => {
+		self.detailedError = self._elemWrapper.detailedError
+		self.destroy() // don't pass err though so the user doesn't need to listen for errors
 	}
-	this._onWaiting = () => {
-		this._waitingFired = true
-		if (!this._muxer) {
-			this._createMuxer()
-		} else if (this._tracks) {
-			this._pump()
+	self._onWaiting = () => {
+		self._waitingFired = true
+		if (!self._muxer) {
+			self._createMuxer()
+		} else if (self._tracks) {
+			self._pump()
 		}
 	}
-	if(this._elem.autoplay)
-		this._elem.preload = "auto";
-	this._elem.addEventListener('waiting', this._onWaiting)
-	this._elem.addEventListener('error', this._onError)
+	if(self._elem.autoplay)
+		self._elem.preload = "auto";
+	self._elem.addEventListener('waiting', self._onWaiting)
+	self._elem.addEventListener('error', self._onError)
 }
 
 VideoStream.prototype._createMuxer = function () {
-	this._muxer = new MP4Remuxer(this._file)
-	this._muxer.on('ready', data => {
-		this._tracks = data.map(trackData => {
-			const mediaSource = this._elemWrapper.createWriteStream(trackData.mime);
+	const self = this;
+	self._muxer = new MP4Remuxer(self._file)
+	self._muxer.on('ready', data => {
+		self._tracks = data.map(trackData => {
+			const mediaSource = self._elemWrapper.createWriteStream(trackData.mime);
 			mediaSource.on('error', err => {
-				this._elemWrapper.error(err)
+				self._elemWrapper.error(err)
 			})
 			const track = {
 				muxed: null,
@@ -60,27 +64,28 @@ VideoStream.prototype._createMuxer = function () {
 			return track
 		})
 
-		if (this._waitingFired || this._elem.preload === 'auto') {
-			this._pump()
+		if (self._waitingFired || self._elem.preload === 'auto') {
+			self._pump()
 		}
 	})
 
-	this._muxer.on('error', err => {
-		this._elemWrapper.error(err)
+	self._muxer.on('error', err => {
+		self._elemWrapper.error(err)
 	})
 }
 
 VideoStream.prototype._pump = function () {
+	const self = this;
 
-	const muxed = this._muxer.seek(this._elem.currentTime, !this._tracks);
+	const muxed = self._muxer.seek(self._elem.currentTime, !self._tracks);
 
-	this._tracks.forEach((track, i) => {
+	self._tracks.forEach((track, i) => {
 		const pumpTrack = () => {
 			if (track.muxed) {
 				track.muxed.destroy()
-				track.mediaSource = this._elemWrapper.createWriteStream(track.mediaSource)
+				track.mediaSource = self._elemWrapper.createWriteStream(track.mediaSource)
 				track.mediaSource.on('error', err => {
-					this._elemWrapper.error(err)
+					self._elemWrapper.error(err)
 				})
 			}
 			track.muxed = muxed[i]
@@ -89,7 +94,7 @@ VideoStream.prototype._pump = function () {
 		if (!track.initFlushed) {
 			track.onInitFlushed = err => {
 				if (err) {
-					this._elemWrapper.error(err)
+					self._elemWrapper.error(err)
 					return
 				}
 				pumpTrack()
@@ -101,23 +106,22 @@ VideoStream.prototype._pump = function () {
 }
 
 VideoStream.prototype.destroy = function () {
-	if (this.destroyed) {
+	const self = this;
+	if (self.destroyed) {
 		return
 	}
-	this.destroyed = true
+	self.destroyed = true
 
-	this._elem.removeEventListener('waiting', this._onWaiting)
-	this._elem.removeEventListener('error', this._onError)
+	self._elem.removeEventListener('waiting', self._onWaiting)
+	self._elem.removeEventListener('error', self._onError)
 
-	if (this._tracks) {
-		this._tracks.forEach(track => {
+	if (self._tracks) {
+		self._tracks.forEach(track => {
 			if (track.muxed) {
 				track.muxed.destroy()
 			}
 		})
 	}
 
-	this._elem.src = ''
+	self._elem.src = ''
 }
-
-module.exports = VideoStream
