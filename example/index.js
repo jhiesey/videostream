@@ -2,7 +2,7 @@ var http = require('http')
 var MultiStream = require('multistream')
 var stream = require('stream')
 
-var videostream = require('../')
+var VideoStream = require('../')
 
 // This demo requires sintel.mp4 to be copied into the example directory
 var REQUEST_SIZE = 2000000 // 2mb
@@ -60,7 +60,7 @@ var video = document.querySelector('video')
 video.addEventListener('error', function (err) {
 	console.error(video.error)
 })
-videostream(new file('sintel.mp4'), video)
+new VideoStream(new file('sintel.mp4'), video)
 
 /*
 var WebTorrent = require('webtorrent');

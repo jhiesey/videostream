@@ -31,7 +31,7 @@ const exampleFile = {
 const VideoStream = require('videostream');
 
 const elem = document.createElement('video');
-const videostream = VideoStream(exampleFile, elem);
+const videostream = new VideoStream(exampleFile, elem);
 
 elem.addEventListener('error', () => {
   // listen for errors on the video/audio element directly
