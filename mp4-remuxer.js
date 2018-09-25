@@ -1,5 +1,5 @@
 const bs = require('binary-search');
-const EventEmitter = require('events').EventEmitter;
+const EventEmitter = require('events');
 const mp4 = require('mp4-stream');
 const Box = require('mp4-box-encoding');
 const RangeSliceStream = require('range-slice-stream');
