@@ -1,21 +1,16 @@
 const bs = require('binary-search');
 const EventEmitter = require('events').EventEmitter;
-const inherits = require('inherits');
 const mp4 = require('mp4-stream');
 const Box = require('mp4-box-encoding');
 const RangeSliceStream = require('range-slice-stream');
 
-module.exports = MP4Remuxer
-
-class MP4Remuxer {
+class MP4Remuxer extends EventEmitter {
     constructor(file) {
-        const self = this;
-        EventEmitter.call(self)
-        self._tracks = []
-        self._fragmentSequence = 1
-        self._file = file
-        self._decoder = null
-        self._findMoov(0)
+        this._tracks = []
+        this._fragmentSequence = 1
+        this._file = file
+        this._decoder = null
+        this._findMoov(0)
     }
 
     _findMoov(offset) {
@@ -444,8 +439,6 @@ class MP4Remuxer {
     }
 }
 
-inherits(MP4Remuxer, EventEmitter)
-
 class RunLengthIndex {
     constructor(entries, countName) {
         const self = this;
@@ -478,3 +471,5 @@ function empty () {
 }
 
 const MIN_FRAGMENT_DURATION = 1; // second
+
+module.exports = MP4Remuxer
