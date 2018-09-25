@@ -3,8 +3,6 @@ const pump = require('pump')
 
 const MP4Remuxer = require('./mp4-remuxer')
 
-module.exports = VideoStream
-
 function VideoStream (file, mediaElem, opts) {
   const self = this
   if (!(this instanceof VideoStream)) return new VideoStream(file, mediaElem, opts)
@@ -124,3 +122,5 @@ VideoStream.prototype.destroy = function () {
 
   self._elem.src = ''
 }
+
+module.exports = VideoStream
