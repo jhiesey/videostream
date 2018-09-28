@@ -102,8 +102,11 @@ CacheStream.prototype._read = function(size) {
 };
 
 CacheStream.prototype._destroy = function(err, cb) {
-    this._file.stream = false;
-    cb(err);
+    var file = this._file || false;
+    if (file.cache) { // if not destroyed
+        file.stream = false;
+    }
+    cb(err || !file.cache);
 };
 
 function VideoFile(data, streamer) {
@@ -140,6 +143,10 @@ function VideoFile(data, streamer) {
     }
 
     window.addEventListener('online', this);
+
+    if (typeof window.setImmediate !== 'function') {
+        this.onIdle = window.onIdle;
+    }
 }
 
 VideoFile.prototype = Object.create(null);
@@ -149,6 +156,10 @@ Object.defineProperty(VideoFile.prototype, 'isOnline', {
         return navigator.onLine !== false;
     }
 });
+
+VideoFile.prototype.onIdle = function(callback) {
+    window.setImmediate(callback);
+};
 
 VideoFile.prototype.handleEvent = function(ev) {
     if (d) {
@@ -420,7 +431,7 @@ VideoFile.prototype.fetch = function fetch(startpos, recycle) {
             delete self.fetching[pos];
 
             var retry = function() {
-                window.setImmediate(self.fetch.bind(self, startpos, recycle));
+                self.onIdle(self.fetch.bind(self, startpos, recycle));
             };
 
             if (typeof ev === 'number') {
@@ -441,6 +452,13 @@ VideoFile.prototype.fetch = function fetch(startpos, recycle) {
                 }
                 self.overquota = true;
                 self.retryq.push(retry);
+
+                // TODO: ensure no drawbacks...
+                /*if (!startpos)*/
+                {
+                    var streamer = self.streamer;
+                    streamer.handleEvent({type: 'stalled', fake: 1});
+                }
             }
             else {
                 if (d) {
