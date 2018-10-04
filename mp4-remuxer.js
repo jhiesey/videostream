@@ -75,6 +75,7 @@ MP4Remuxer.prototype._findMoov = function(offset) {
 
     self._decoder.once('box', function(headers) {
         var findNextBox = function() {
+            fileStream.destroy();
             self._decoder.destroy();
 
             if (self['_' + lastbox]) {
@@ -84,7 +85,6 @@ MP4Remuxer.prototype._findMoov = function(offset) {
                 self._findMoov(offset + headers.length);
             }
         };
-        fileStream.destroy();
 
         if (d) {
             console.debug('box', headers.type, headers.length, headers, offset);

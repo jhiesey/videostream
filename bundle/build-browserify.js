@@ -2,6 +2,7 @@
 
 // Required dependencies
 const util = require('util');
+const babel = require("@babel/core");
 const inherits = require('inherits');
 const pkg = require('../package.json');
 const UglifyJS = require("uglify-js");
@@ -9,8 +10,11 @@ const Browserify = require('browserify');
 const Transform = require('stream').Transform || require('readable-stream').Transform;
 
 // Helper constants
-const cwd = String(process.cwd()).replace(/\\/g, '/');
 const startTime = Date.now();
+const cwd = String(process.cwd()).replace(/\\/g, '/');
+const babelOptions = {
+    presets: [["@babel/preset-env", {loose: true, "targets": {"ie": "11"}}]]
+};
 let files = 0, sizes = 0, error = 0;
 
 // Starts bundle creation
@@ -63,6 +67,7 @@ function Megaify(filename) {
     Transform.call(this);
 
     this.cwd = cwd;
+    this.osfile = filename;
     this.filesize = require('fs').statSync(filename).size;
     this.filename = String(filename).replace(/\\/g, '/').replace(this.cwd, '..');
 
@@ -79,7 +84,11 @@ inherits(Megaify, Transform);
 
 Megaify.prototype._transform = function(chunk, enc, cb) {
     const self = this;
+    const q = s => String(s).replace(/\W/g, '\\$&');
+    const dump = s => process.stderr.write(s + '\n');
+    const buffer = 'var Buffer = require("buffer").Buffer;\n';
     let beautify = true;
+    let transpile = false;
 
     chunk = chunk.toString('utf-8');
 
@@ -93,6 +102,20 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
             return cb();
         }
         chunk = this.chunks.join('');
+    }
+
+    // We'll loose transpile readable-stream +3.x's errors.js ourselves to save a few KBs...
+    if (this.filename.indexOf('/readable-stream/errors-browser.js') > 0) {
+        chunk = require('fs').readFileSync(this.osfile.replace('errors-browser.js', 'errors.js'));
+        transpile = true;
+    }
+
+    // Transpile ECMAScript 2015+ code into a backwards compatible version
+    if (transpile || this.filename.indexOf('/range-slice-stream/index.js') > 0) {
+        chunk = babel.transformSync(chunk, babelOptions).code;
+
+        chunk = chunk.replace(/function _inheritsLoose[^\n]+/, '');
+        chunk = chunk.replace(/_inheritsLoose/g, "require('inherits')");
     }
 
     // Export mp4-box-encoding's boxes so we can extend them externally
@@ -121,7 +144,7 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
         || this.filename.indexOf('/uint64be/index.js') > 0
         || this.filename.indexOf('/mp4-stream/decode') > 0) {
 
-        chunk = 'var Buffer = require("buffer").Buffer;\n' + chunk;
+        chunk = buffer + chunk;
     }
 
     // Replace the slow .slice(arguments) usage
@@ -166,14 +189,35 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
         chunk = chunk.replace("require('isarray')", 'Array.isArray');
 
         // We don't need any process.* stuff...
-        const re = new RegExp("require('process-nextick-args')".replace(/\W/g, '\\$&'), 'g');
+        let re = new RegExp(q("require('process-nextick-args')"), 'g');
         chunk = chunk.replace(re, self.getUtilsMod(1));
         chunk = chunk.replace(' && dest !== process.stdout && dest !== process.stderr', '');
+        chunk = chunk.replace('process.emitWarning', 'console.warn');
+
+        // Replace process.nextTick calls not covered by the above
+        re = q('process.nextTick(') + '([^,]+?)(,[^)]+?)?\\)';
+        chunk = chunk.replace(new RegExp(re, 'g'), 'onIdleA($1.bind(null$2))');
 
         // We don't need util.inspect...
-        chunk = chunk.replace("var util = require('util');", '');
-        chunk = chunk.replace('util && util.inspect && util.inspect.custom', '0');
+        if (this.filename.indexOf('/readable-stream/lib/internal/streams/buffer_list.js') > 0) {
+            chunk = "'use strict';\n" + buffer + chunk.substr(chunk.indexOf('function copyBuffer'));
+            chunk = chunk.replace("BufferList.prototype[custom]", 'if(0)var _');
+            chunk = chunk.replace('_classCallCheck', '0&&$&');
+        }
 
+        // readable-stream +3.x added Symbol.asyncIterator which we don't need...
+        if (this.filename.indexOf('/readable-stream/lib/_stream_readable.js') > 0) {
+            chunk = chunk.replace("var _require2 = require('../experimentalWarning'),", '');
+            chunk = chunk.replace("emitExperimentalWarning = _require2.emitExperimentalWarning;", '');
+            chunk = chunk.replace('Readable.prototype[Symbol.asyncIterator]', 'if(0)var _');
+            chunk = chunk.replace("require('./internal/streams/async_iterator')", '0xBADF');
+        }
+
+        // readable-stream +3.x removed OurUint8Array out of an /*<replacement>*/ block..
+        re = '([\n\\s]+var Buffer[^\n]+[\n\\s]+var OurUint8Array[\\s\\S]+?function _isUint8Array[^}]+\\})';
+        chunk = chunk.replace(new RegExp(re), '\n\n/*<replacement>*/$1\n/*</replacement>*/\n');
+
+        // Transpile /*<replacement>*/ blocks to our needs...
         chunk = this.getReplacements(chunk, function(match) {
 
             // Let's use our MegaLogger

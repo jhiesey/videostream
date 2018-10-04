@@ -17,6 +17,9 @@ function CacheStream(pos, file) {
     }
 
     Readable.call(this);
+    if (!file.cache) {
+        return this;
+    }
     this.pos = pos;
     this._file = file;
     this._file.stream = this;
@@ -828,7 +831,7 @@ Streamer.prototype.handleEvent = function(ev) {
 
         if (ev.type === 'error') {
             var mediaError = target.error || false;
-            var streamError = this.stream._elemWrapper.detailedError;
+            var streamError = Object(this.stream._elemWrapper).detailedError;
             error = streamError && streamError.message || mediaError.message;
 
             if (mediaError.code) {
