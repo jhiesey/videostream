@@ -274,9 +274,7 @@ class MP4Remuxer extends EventEmitter {
         startOffset = fragment.ranges[0].start
       }
 
-      writeFragment(fragment)
-
-      function writeFragment (frag) {
+      const writeFragment = (frag) => {
         if (outStream.destroyed) return
         outStream.box(frag.moof, err => {
           if (err) return this.emit('error', err)
@@ -293,6 +291,7 @@ class MP4Remuxer extends EventEmitter {
           }))
         })
       }
+      writeFragment(fragment)
     })
 
     if (startOffset >= 0) {
