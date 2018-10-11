@@ -9,7 +9,6 @@ class MP4Remuxer extends EventEmitter {
     super()
 
     this._tracks = []
-    this._fragmentSequence = 1
     this._file = file
     this._decoder = null
     this._findMoov(0)
@@ -204,6 +203,7 @@ class MP4Remuxer extends EventEmitter {
       }
 
       this._tracks.push({
+        fragmentSequence: 1,
         trackId: trak.tkhd.trackId,
         timeScale: trak.mdia.mdhd.timeScale,
         samples,
@@ -402,7 +402,7 @@ class MP4Remuxer extends EventEmitter {
     const moof = {
       type: 'moof',
       mfhd: {
-        sequenceNumber: this._fragmentSequence++
+        sequenceNumber: currTrack.fragmentSequence++
       },
       trafs: [{
         tfhd: {
