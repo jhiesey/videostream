@@ -4,6 +4,7 @@ var MAX_CACHE = localStorage.maxStreamingCache | 0 || (500 * 1048576);
 var MIN_CACHE = localStorage.minStreamingCache | 0 || (400 * 1048576);
 var REQUEST_SIZE = 4 * 1048576;
 var MAX_BUF_SECONDS = 25;
+var SIMULATE_RESUME_FROM_STALLED = false;
 
 var VideoStream = require('../videostream');
 var AudioStream = require('../audiostream');
@@ -133,6 +134,7 @@ function VideoFile(data, streamer) {
     this.paused = true;
     this.playing = false;
     this.canplay = false;
+    this.overquota = false;
     this.bgtask = !streamer.options.autoplay;
     this.retryq = [];
 
@@ -191,6 +193,7 @@ VideoFile.prototype.flushRetryQueue = function() {
             later(this.retryq[i]);
         }
         this.retryq = [];
+        this.overquota = false;
     }
 };
 
@@ -276,6 +279,9 @@ VideoFile.prototype.cacheadd = function cacheadd(pos, data) {
 };
 
 VideoFile.prototype.fetcher = function(data, byteOffset, byteLength) {
+    if (SIMULATE_RESUME_FROM_STALLED && byteOffset > (REQUEST_SIZE * 8)) {
+        return MegaPromise.reject({target: {status: 509}}, data);
+    }
     return new MegaPromise(function(resolve, reject) {
         M.gfsfetch(data, byteOffset, byteLength).fail(reject).done(function(data) {
             var buffer = data.buffer;
@@ -420,9 +426,11 @@ VideoFile.prototype.fetch = function fetch(startpos, recycle) {
             if (thisfetch === self.curfetch) {
                 setTimeout(self.fetch.bind(self, pos, 1), 100);
             }
-            self.feedPlayer();
+
             self.backoff = 200;
-            self.overquota = false;
+            // self.overquota = false;
+
+            self.feedPlayer();
         })
         .catch(function(ev, data) {
             var xhr = ev && ev.target || false;
@@ -455,13 +463,7 @@ VideoFile.prototype.fetch = function fetch(startpos, recycle) {
                 }
                 self.overquota = true;
                 self.retryq.push(retry);
-
-                // TODO: ensure no drawbacks...
-                /*if (!startpos)*/
-                {
-                    var streamer = self.streamer;
-                    streamer.handleEvent({type: 'stalled', fake: 1});
-                }
+                self.streamer._setActivityTimer();
             }
             else {
                 if (d) {
@@ -514,6 +516,7 @@ function Streamer(data, video, options) {
         return new Streamer(data, video, options);
     }
     this.gecko = uad.engine === 'Gecko';
+    this.msie = "ActiveXObject" in window;
     this.options = Object.assign(Object.create(null), {autoplay: true}, options);
 
     this._events = [
@@ -533,10 +536,13 @@ function Streamer(data, video, options) {
     this.video = video;
     this.timeupdate = 0;
     this.stalled = false;
-    this.inactivity = false;
     this.activitimer = null;
     this.evs = Object.create(null);
     this.presentationOffset = 0;
+
+    if (d && window.vssrfs) {
+        SIMULATE_RESUME_FROM_STALLED = true;
+    }
 
     if (this.options.type === undefined) {
         // No type given, try to guess if that's a webm otherwise it'll fallback to mp4
@@ -635,9 +641,16 @@ Streamer.prototype.initTypeGuess = function(data) {
 
     file.fetcher(data, 0, 16)
         .then(function(chunk) {
-            var dv = new DataView(chunk.buffer);
-            var long = dv.getUint32(0, false);
+            var buffer = chunk.buffer;
             delete chunk.buffer;
+
+            if (Array.isArray(chunk)) {
+                buffer = chunk[1];
+                chunk = chunk[0];
+            }
+
+            var dv = new DataView(buffer);
+            var long = dv.getUint32(0, false);
 
             if (long === 0x1A45DFA3) {
                 self.options.type = 'WebM';
@@ -673,7 +686,9 @@ Streamer.prototype.destroy = function() {
     this._clearActivityTimer();
 
     try {
-        this.stream.destroy();
+        if (this.stream) {
+            this.stream.destroy();
+        }
     }
     catch (ex) {
         console.warn(ex);
@@ -700,8 +715,11 @@ Streamer.prototype.destroy = function() {
         }
     }
 
+    delete this.evs;
     delete this.file;
     delete this.video;
+    delete this.abort;
+    delete this.stream;
 };
 
 Streamer.prototype.onPlayBackEvent = function(playing) {
@@ -720,18 +738,16 @@ Streamer.prototype.onPlayBackEvent = function(playing) {
     if (playing) {
         videoFile.playing = true;
         videoFile.seeking = false;
-        this._setActivityTimer();
 
         if (this.stalled) {
             this.stalled = false;
             this.notify('activity');
 
             // XXX: on MSIE the video continues stalled while audio does play, seeking back fixes it..
-            if ("ActiveXObject" in window) {
+            if (this.msie) {
                 this.video.currentTime = this.video.currentTime - .2;
             }
         }
-        this.inactivity = false;
     }
 };
 
@@ -788,14 +804,6 @@ Streamer.prototype.handleEvent = function(ev) {
             this.stream.flushSourceBuffers(-1);
             break;
 
-        case 'stalled':
-            // don't act upon stalled if in background pre-buffering stage
-            if (!videoFile.bgtask) {
-                this.stalled = true;
-                this._setActivityTimer();
-            }
-            break;
-
         case 'timeupdate':
             if (videoFile.throttle && videoFile.throttle - target.currentTime < (MAX_BUF_SECONDS / 3)) {
                 if (d) {
@@ -811,15 +819,20 @@ Streamer.prototype.handleEvent = function(ev) {
                 }
             }
 
+            // console.warn('timeupdate', this.timeupdate, target.currentTime, target.readyState, this.stalled);
+
             // XXX: MSIE keeps firing 'timeupdate' even if stalled :(
             if (this.timeupdate !== target.currentTime) {
                 this.timeupdate = target.currentTime;
 
                 // XXX: MSIE won't signal 'playing' on no longer stalled :(
-                if (this.inactivity) {
+                if (this.stalled && target.readyState > 2) {
                     this.onPlayBackEvent(true);
                 }
-                else {
+
+                // XXX: MSIE may fires a timeupdate after a pause, causing
+                // the overquota dialog to come up when it should not.. :(
+                if (!videoFile.paused) {
                     this._setActivityTimer();
                 }
             }
@@ -844,6 +857,13 @@ Streamer.prototype.handleEvent = function(ev) {
         this.notify(ev, error || false);
     }
 };
+
+Streamer.prototype.retry = function() {
+    debugger;
+    SIMULATE_RESUME_FROM_STALLED = false;
+    dlmanager._onQuotaRetry(true);
+};
+
 
 Streamer.prototype.play = function() {
     // Some browsers, such as Chrome Android, will throw:
@@ -878,12 +898,11 @@ Streamer.prototype.play = function() {
         if (!videoFile.overquota) {
             videoFile.flushRetryQueue();
         }
-        else {
-            // fire inactivity, for the listener to invoke the quota dialog
-            this.stalled = true;
-            this._setActivityTimer();
-        }
         this.options.autoplay = true;
+    }
+
+    if (videoFile) {
+        this._setActivityTimer();
     }
 };
 
@@ -916,12 +935,17 @@ Streamer.prototype.notify = function(ev) {
             };
         }
 
-        this.evs[type] = this.evs[type].filter(function(cb) {
+        var result = this.evs[type].filter(function(cb) {
             return cb.apply(null, args);
         });
 
-        if (!this.evs[type].length) {
-            delete this.evs[type];
+        // an error callback may destroys this instance
+        if (this.evs) {
+            this.evs[type] = result;
+
+            if (!this.evs[type].length) {
+                delete this.evs[type];
+            }
         }
     }
 };
@@ -938,15 +962,15 @@ Streamer.prototype._setActivityTimer = function() {
 
     this._clearActivityTimer();
     this.activitimer = setTimeout(function() {
-        if (self.stalled) {
-            var video = self.video;
+        var file = self.file;
+        var video = self.video || false;
 
-            if (!video.paused && !video.ended || self.file.overquota) {
-                self.notify('inactivity');
+        if (!video.paused && !video.ended || !file.bgtask && self.isOverQuota) {
+            self.stalled = true;
+            self.notify('inactivity');
 
-                // XXX: MSIE won't signal 'playing' on no longer stalled :(
-                self.inactivity = true;
-            }
+            // We used to handle stalled events... http://crbug.com/836951
+            self.handleEvent({type: 'stalled', fake: 1, target: video});
         }
     }, 1600);
 };
@@ -957,7 +981,10 @@ Streamer.prototype.getImage = function(w, h) {
 
     return new Promise(function _(resolve, reject) {
         if (!video.videoWidth) {
-            return reject(-9);
+            onIdle(function() {
+                reject(-9);
+            });
+            return;
         }
         var dim = self.dim(video.videoWidth, video.videoHeight, w || 1280, h || 720);
 
@@ -985,11 +1012,10 @@ Streamer.prototype.getImage = function(w, h) {
                 console.debug('[Streamer.getImage()] Got +70% of black pixels, retrying...');
             }
 
-            if (video.paused) {
-                reject(-5);
-            }
-            else if (video.ended) {
-                reject(-8);
+            if (video.paused || video.ended) {
+                onIdle(function() {
+                    reject(-5);
+                });
             }
             else {
                 setTimeout(_.bind(this, resolve, reject), 800);
@@ -1112,6 +1138,13 @@ Object.defineProperty(Streamer.prototype, 'hasUnsupportedAudio', {
 Object.defineProperty(Streamer.prototype, 'hasVideo', {
     get: function() {
         return this.stream && Object(this.stream._muxer)._hasVideo;
+    }
+});
+
+Object.defineProperty(Streamer.prototype, 'isOverQuota', {
+    get: function() {
+        var file = this.file || false;
+        return file.overquota && !Object.keys(file.fetching || {}).length;
     }
 });
 

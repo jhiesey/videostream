@@ -126,10 +126,21 @@ RunLengthIndex.prototype.inc = function () {
 MP4Remuxer.prototype._processMoov = function (moov) {
 	var self = this
 	var mp3audio = {'mp4a.6b': 1, 'mp4a.69': 1};
-	var traks = moov.traks
+	var traks = moov.traks || false;
+
+	if (moov.otherBoxes) {
+		for (var b = moov.otherBoxes.length; b--;) {
+			if (moov.otherBoxes[b] instanceof Error) {
+				self.emit('error', moov.otherBoxes[b]);
+				return;
+			}
+		}
+	}
+
 	self._tracks = []
 	self._hasVideo = false
 	self._hasAudio = false
+
 	for (var i = 0; i < traks.length; i++) {
 		var trak = traks[i]
 		var stbl = trak.mdia.minf.stbl

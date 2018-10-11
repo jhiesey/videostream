@@ -123,7 +123,8 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
         chunk = chunk.replace('Box = exports', 'Box=exports;Box.boxes=boxes');
 
         // Provide a more meaningful message for unsupported videos
-        chunk = chunk.replace("'Data too short'", "'Unsupported media format, data too short...'");
+        chunk = chunk.replace("throw new Error('Data too short')",
+            "return new Error('Unsupported media format, data too short...')");
 
         // let's do some debugging here...
         chunk = chunk.replace('var obj = {}',
