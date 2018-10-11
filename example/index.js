@@ -74,7 +74,7 @@ const torrentUrl = 'https://webtorrent.io/torrents/sintel.torrent'
 client.add(torrentUrl, torrent => {
   // Got torrent metadata!
   console.log('Torrent info hash:', torrent.infoHash)
-  // Let's say the first file is a mp4 (h264) video...
+  // Let's say the fifth file is a mp4 (h264) video...
   new VideoStream(torrent.files[5], document.querySelector('video'))
 })
 */
