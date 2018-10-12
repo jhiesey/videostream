@@ -539,6 +539,8 @@ function Streamer(data, video, options) {
     this.activitimer = null;
     this.evs = Object.create(null);
     this.presentationOffset = 0;
+    this.playbackTook = Date.now();
+    this.playbackEvent = false;
 
     if (d && window.vssrfs) {
         SIMULATE_RESUME_FROM_STALLED = true;
@@ -718,7 +720,6 @@ Streamer.prototype.destroy = function() {
     delete this.evs;
     delete this.file;
     delete this.video;
-    delete this.abort;
     delete this.stream;
 };
 
@@ -738,6 +739,11 @@ Streamer.prototype.onPlayBackEvent = function(playing) {
     if (playing) {
         videoFile.playing = true;
         videoFile.seeking = false;
+
+        if (!this.playbackEvent) {
+            this.playbackEvent = true;
+            this.playbackTook = Date.now() - this.playbackTook;
+        }
 
         if (this.stalled) {
             this.stalled = false;
@@ -1145,6 +1151,13 @@ Object.defineProperty(Streamer.prototype, 'isOverQuota', {
     get: function() {
         var file = this.file || false;
         return file.overquota && !Object.keys(file.fetching || {}).length;
+    }
+});
+
+Object.defineProperty(Streamer.prototype, 'hasStartedPlaying', {
+    get: function() {
+        var self = this;
+        return self.playbackEvent && (this.playbackTook || true);
     }
 });
 
