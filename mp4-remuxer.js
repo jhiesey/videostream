@@ -12,7 +12,6 @@ function MP4Remuxer (file) {
 	var self = this
 	EventEmitter.call(self)
 	self._tracks = []
-	self._fragmentSequence = 1
 	self._file = file
 	self._decoder = null
 	self._findMoov(0)
@@ -327,6 +326,7 @@ MP4Remuxer.prototype._processMoov = function (moov) {
 		}
 
 		self._tracks.push({
+      fragmentSequence: 1,
 			trackId: trak.tkhd.trackId,
 			timeScale: trak.mdia.mdhd.timeScale,
 			samples: samples,
@@ -591,7 +591,7 @@ MP4Remuxer.prototype._generateMoof = function (track, firstSample, lastSample) {
 	var moof = {
 		type: 'moof',
 		mfhd: {
-			sequenceNumber: self._fragmentSequence++
+      sequenceNumber: currTrack.fragmentSequence++
 		},
 		trafs: [{
 			tfhd: {

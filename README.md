@@ -22,11 +22,11 @@ Videostream just exports a function. Use it like this:
 const VideoStream = require('videostream')
 
 const exampleFile = {
-	createReadStream (opts) {
-		const { start, end } = opts
-		// Return a readable stream that provides the bytes
-		// between offsets "start" and "end" inclusive
-	}
+  createReadStream (opts) {
+    const { start, end } = opts
+    // Return a readable stream that provides the bytes
+    // between offsets "start" and "end" inclusive
+  }
 }
 
 const video = document.createElement('video')
