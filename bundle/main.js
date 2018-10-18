@@ -187,6 +187,12 @@ VideoFile.prototype.destroy = function() {
     Object.freeze(this);
 };
 
+VideoFile.prototype.reset = function() {
+    // Free up memory used by the cache when no longer needed.
+    window.removeEventListener('online', this);
+    VideoFile.call(this, this.data, this.streamer);
+};
+
 VideoFile.prototype.flushRetryQueue = function() {
     if (this.retryq && this.retryq.length) {
         for (var i = 0; i < this.retryq.length; i++) {
@@ -541,6 +547,7 @@ function Streamer(data, video, options) {
     this.presentationOffset = 0;
     this.playbackTook = Date.now();
     this.playbackEvent = false;
+    this.playbackSeeking = false;
 
     if (d && window.vssrfs) {
         SIMULATE_RESUME_FROM_STALLED = true;
@@ -663,6 +670,9 @@ Streamer.prototype.initTypeGuess = function(data) {
             else if (long === 0x4F676753) {
                 self.options.type = 'Ogg';
             }
+            else if (long === 0x664C6143) {
+                self.options.type = 'FLAC';
+            }
             else if (dv.getUint32(8, false) === 0x4D344120) {
                 self.options.type = 'M4A ';
             }
@@ -744,6 +754,7 @@ Streamer.prototype.onPlayBackEvent = function(playing) {
             this.playbackEvent = true;
             this.playbackTook = Date.now() - this.playbackTook;
         }
+        this.playbackSeeking = false;
 
         if (this.stalled) {
             this.stalled = false;
@@ -1086,7 +1097,7 @@ Streamer.prototype.getProperty = function(key) {
 Object.defineProperty(Streamer.prototype, 'duration', {
     get: function() {
         var video = this.video || false;
-        return (video.duration - this.presentationOffset) | 0;
+        return video.duration - this.presentationOffset;
     }
 });
 
@@ -1110,9 +1121,11 @@ Object.defineProperty(Streamer.prototype, 'currentTime', {
             stream._play(v);
             this.play();
         }
-        else {
+        else if (video.readyState) {
             video.currentTime = v + this.presentationOffset;
         }
+
+        this.playbackSeeking = true;
     }
 });
 
@@ -1125,7 +1138,7 @@ Object.defineProperty(Streamer.prototype, 'goAudioStream', {
             return mega.fullAudioContextSupport;
         }
 
-        return type === 'MPEG Audio' || type === 'Wave' || type === 'Ogg';
+        return type === 'MPEG Audio' || type === 'Wave' || type === 'Ogg' || type === 'FLAC';
     }
 });
 
@@ -1156,8 +1169,13 @@ Object.defineProperty(Streamer.prototype, 'isOverQuota', {
 
 Object.defineProperty(Streamer.prototype, 'hasStartedPlaying', {
     get: function() {
-        var self = this;
-        return self.playbackEvent && (this.playbackTook || true);
+        return this.playbackEvent && (this.playbackTook || true);
+    }
+});
+
+Object.defineProperty(Streamer.prototype, 'gotIntoBuffering', {
+    get: function() {
+        return this.stalled && this.hasStartedPlaying && this.currentTime < this.duration && !this.playbackSeeking;
     }
 });
 

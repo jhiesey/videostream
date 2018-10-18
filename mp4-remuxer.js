@@ -326,7 +326,7 @@ MP4Remuxer.prototype._processMoov = function (moov) {
 		}
 
 		self._tracks.push({
-      fragmentSequence: 1,
+			fragmentSequence: 1,
 			trackId: trak.tkhd.trackId,
 			timeScale: trak.mdia.mdhd.timeScale,
 			samples: samples,
@@ -591,7 +591,7 @@ MP4Remuxer.prototype._generateMoof = function (track, firstSample, lastSample) {
 	var moof = {
 		type: 'moof',
 		mfhd: {
-      sequenceNumber: currTrack.fragmentSequence++
+			sequenceNumber: currTrack.fragmentSequence++
 		},
 		trafs: [{
 			tfhd: {

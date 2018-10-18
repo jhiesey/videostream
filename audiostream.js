@@ -16,6 +16,10 @@ function AudioStream(file, mediaElem, opts) {
     EventEmitter.call(self);
 
     var context = new AudioContext();
+    var destroy = function(ex) {
+        log(ex);
+        self.destroy(ex);
+    };
 
     self._buffer = null;
     self._playOffset = 0;
@@ -40,21 +44,16 @@ function AudioStream(file, mediaElem, opts) {
         self._buffer = buffer ? Buffer.concat([buffer, data]) : data;
     });
 
-    fileStream.on('end', function() {
-        var buffer = toArrayBuffer(self._buffer);
-
+    fileStream.on('end', tryCatch(function() {
         fileStream.destroy();
-        context.decodeAudioData(buffer.slice(0), function(buffer) {
-            try {
-                self._setup(buffer, opts.autoplay);
-            }
-            catch (ex) {
-                log(ex);
-                self.destroy(ex);
-            }
-        });
+        fileStream._file.reset();
+
+        var buffer = toArrayBuffer(self._buffer);
+        self._buffer = null;
+
         self.emit('audio-buffer', buffer);
-    });
+        context.decodeAudioData(buffer).then(self._setup.bind(self, opts.autoplay)).catch(destroy);
+    }, destroy));
 
     self._onError = function(err) {
         self.destroy(err);
@@ -121,7 +120,7 @@ AudioStream.prototype.destroy = function(err) {
     }
 };
 
-AudioStream.prototype._setup = function(buffer, autoplay) {
+AudioStream.prototype._setup = function(autoplay, buffer) {
     var self = this;
     var elm = self._elem;
     var audioContext = self._audioContext;
