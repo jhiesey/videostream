@@ -4,6 +4,10 @@ const mp4 = require('mp4-stream')
 const Box = require('mp4-box-encoding')
 const RangeSliceStream = require('range-slice-stream')
 
+// if we want to ignore more than this many bytes, request a new stream.
+// if we want to ignore fewer, just skip them.
+const FIND_MOOV_SEEK_SIZE = 4096
+
 class MP4Remuxer extends EventEmitter {
   constructor (file) {
     super()
@@ -19,13 +23,14 @@ class MP4Remuxer extends EventEmitter {
       this._decoder.destroy()
     }
 
+    let toSkip = 0
     this._decoder = mp4.decode()
     const fileStream = this._file.createReadStream({
       start: offset
     })
     fileStream.pipe(this._decoder)
 
-    this._decoder.once('box', headers => {
+    this._decoder.on('box', headers => {
       if (headers.type === 'moov') {
         this._decoder.decode(moov => {
           fileStream.destroy()
@@ -36,9 +41,14 @@ class MP4Remuxer extends EventEmitter {
             this.emit('error', err)
           }
         })
+      } else if (headers.length < FIND_MOOV_SEEK_SIZE) {
+        toSkip += headers.length
+        this._decoder.ignore()
       } else {
+        toSkip += headers.length
         fileStream.destroy()
-        this._findMoov(offset + headers.length)
+        this._decoder.destroy()
+        this._findMoov(offset + toSkip)
       }
     })
   }
