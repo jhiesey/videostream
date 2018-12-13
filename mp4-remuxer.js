@@ -30,8 +30,9 @@ class MP4Remuxer extends EventEmitter {
     })
     fileStream.pipe(this._decoder)
 
-    this._decoder.on('box', headers => {
+    const boxHandler = headers => {
       if (headers.type === 'moov') {
+        this._decoder.removeListener('box', boxHandler)
         this._decoder.decode(moov => {
           fileStream.destroy()
           try {
@@ -45,12 +46,15 @@ class MP4Remuxer extends EventEmitter {
         toSkip += headers.length
         this._decoder.ignore()
       } else {
+        this._decoder.removeListener('box', boxHandler)
         toSkip += headers.length
         fileStream.destroy()
         this._decoder.destroy()
         this._findMoov(offset + toSkip)
       }
-    })
+    }
+    this._decoder.on('box', boxHandler)
+
   }
 
   _processMoov (moov) {
