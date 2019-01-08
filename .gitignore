@@ -1,5 +1,5 @@
 .DS_Store
-built.js
+example/built.js
 example/*.mp4
 
 node_modules

@@ -1,10 +1,9 @@
 const http = require('http')
-const MultiStream = require('multistream')
-const stream = require('stream')
+const stream = require('readable-stream')
 const VideoStream = require('../')
 
 // This demo requires sintel.mp4 to be copied into the example directory
-const REQUEST_SIZE = 2000000 // 2mb
+// Also, a reasonably recent browser that allows cancelling fetch or XHR requests is necessary
 
 class file {
   constructor (path) {
@@ -12,47 +11,17 @@ class file {
   }
 
   createReadStream (opts = {}) {
-    let start = opts.start || 0
-    let fileSize = -1
-
-    let req = null
-    const multi = new MultiStream(cb => {
-      const end = opts.end ? (opts.end + 1) : fileSize
-
-      const reqStart = start
-      let reqEnd = start + REQUEST_SIZE
-      if (end >= 0 && reqEnd > end) {
-        reqEnd = end
+    const start = opts.start || 0
+    const str = new stream.PassThrough()
+    http.get({
+      path: this.path,
+      headers: {
+        range: `bytes=${start}-`
       }
-      if (reqStart >= reqEnd) {
-        req = null
-        return cb(null, null)
-      }
-
-      req = http.get({
-        path: this.path,
-        headers: {
-          range: `bytes=${reqStart}-${reqEnd - 1}`
-        }
-      }, res => {
-        const contentRange = res.headers['content-range']
-        if (contentRange) {
-          fileSize = parseInt(contentRange.split('/')[1], 10)
-        }
-        cb(null, res)
-      })
-
-      // For the next request
-      start = reqEnd
+    }, res => {
+      res.pipe(str)
     })
-    const destroy = multi.destroy
-    multi.destroy = () => {
-      if (req) {
-        req.destroy()
-      }
-      destroy.call(multi)
-    }
-    return multi
+    return str
   }
 }
 
