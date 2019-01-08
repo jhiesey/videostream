@@ -6,6 +6,10 @@ var Box = require('mp4-box-encoding')
 var RangeSliceStream = require('range-slice-stream')
 var Buffer = require('buffer').Buffer
 
+// if we want to ignore more than this many bytes, request a new stream.
+// if we want to ignore fewer, just skip them.
+var FIND_MOOV_SEEK_SIZE = 4096;
+
 module.exports = MP4Remuxer
 
 function MP4Remuxer (file) {
@@ -72,16 +76,26 @@ MP4Remuxer.prototype._findMoov = function(offset) {
     self._decoder = mp4.decode();
     fileStream.pipe(self._decoder);
 
-    self._decoder.once('box', function(headers) {
-        var findNextBox = function() {
+    var toSkip = 0;
+    var boxHandler = function(headers) {
+        var destroy = function() {
             fileStream.destroy();
+            self._decoder.removeListener('box', boxHandler);
             self._decoder.destroy();
-
+        };
+        var findNextBox = function() {
             if (self['_' + lastbox]) {
+                destroy();
                 self._parseMoov();
             }
+            else if (headers.length < FIND_MOOV_SEEK_SIZE) {
+                toSkip += headers.length;
+                self._decoder.ignore()
+            }
             else {
-                self._findMoov(offset + headers.length);
+                destroy();
+                toSkip += headers.length;
+                self._findMoov(offset + toSkip);
             }
         };
 
@@ -98,7 +112,8 @@ MP4Remuxer.prototype._findMoov = function(offset) {
         else {
             findNextBox();
         }
-    });
+    };
+    self._decoder.on('box', boxHandler);
 };
 
 function RunLengthIndex (entries, countName) {
