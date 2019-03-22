@@ -52,7 +52,7 @@ function VideoStream(file, mediaElem, opts) {
             self._startTime = null;
         }
     };
-    
+
     if (self._elem.autoplay) {
        self._elem.preload = "auto";
     }
@@ -64,7 +64,8 @@ VideoStream.prototype = Object.create(null);
 
 VideoStream.prototype._createMuxer = function() {
     var self = this;
-    self._muxer = self._type === 'WebM' ? new EBMLRemuxer(self._file) : new MP4Remuxer(self._file);
+    var ebml = {'WebM': 1, 'Matroska': 1};
+    self._muxer = ebml[self._type] ? new EBMLRemuxer(self._file) : new MP4Remuxer(self._file);
     self._muxer.once('ready', function(data) {
         self._tracks = data.map(function(trackData) {
             var mediaSource = self.createWriteStream(trackData.mime);
@@ -263,9 +264,10 @@ VideoStream.prototype._tryPump = function(time) {
             self._seekCoercion = timeStampFixup;
             video.currentTime = timeStampFixup;
 
-            if (!this.withinBufferedRange(timeStampFixup)) {
-                this._tryPump(timeStampFixup);
-            }
+            // if (!this.withinBufferedRange(timeStampFixup)) {
+            //     this._tryPump(timeStampFixup);
+            // }
+            this._tryPump(timeStampFixup);
             return;
         }
     }

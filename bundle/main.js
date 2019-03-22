@@ -12,6 +12,11 @@ var inherits = require('inherits');
 var Readable = require('readable-stream').Readable;
 var Buffer = require('buffer').Buffer;
 
+if (window.safari) {
+    MIN_CACHE >>= 2;
+    MAX_CACHE >>= 2;
+}
+
 function CacheStream(pos, file) {
     if (!(this instanceof CacheStream)) {
         return new CacheStream(pos, file);
@@ -142,8 +147,8 @@ function VideoFile(data, streamer) {
     this.maxCache = MAX_CACHE;
 
     if (data instanceof Blob) {
-        this.minCache = 10 * 1048576;
-        this.maxCache = 40 * 1048576;
+        this.minCache = 64 * 1048576;
+        this.maxCache = 80 * 1048576;
         this.fetcher = this.fileReader;
     }
 
@@ -522,7 +527,7 @@ function Streamer(data, video, options) {
         return new Streamer(data, video, options);
     }
     this.gecko = uad.engine === 'Gecko';
-    this.msie = "ActiveXObject" in window;
+    this.msie = "ActiveXObject" in window || window.MSBlobBuilder;
     this.options = Object.assign(Object.create(null), {autoplay: true}, options);
 
     this._events = [
@@ -539,6 +544,7 @@ function Streamer(data, video, options) {
         video.addEventListener(this._events[i], this, false);
     }
 
+    this.state = false;
     this.video = video;
     this.timeupdate = 0;
     this.stalled = false;
@@ -720,6 +726,12 @@ Streamer.prototype.destroy = function() {
             var clone = video.cloneNode();
             var parent = video.parentNode;
 
+            try {
+                // Edge will preserve the previous offset otherwise...
+                clone.currentTime = 0;
+            }
+            catch (ex) {}
+
             clone.removeAttribute('src');
             clone.removeAttribute('autoplay');
             parent.removeChild(video);
@@ -762,7 +774,7 @@ Streamer.prototype.onPlayBackEvent = function(playing) {
 
             // XXX: on MSIE the video continues stalled while audio does play, seeking back fixes it..
             if (this.msie) {
-                this.video.currentTime = this.video.currentTime - .2;
+                // this.video.currentTime = this.video.currentTime - .2;
             }
         }
     }
@@ -775,6 +787,7 @@ Streamer.prototype.handleEvent = function(ev) {
     if (d && ev.type !== 'timeupdate' || d > 2) {
         console.debug('Event(%s)', ev.type, target, ev);
     }
+    this.state = ev.type;
 
     switch (ev.type) {
         case 'seeking':
@@ -986,6 +999,14 @@ Streamer.prototype._setActivityTimer = function() {
             self.stalled = true;
             self.notify('inactivity');
 
+            // Deal with Safari.. playback might be ready but no canplay event fired yet..
+            if (self.state === 'suspend' && !self.playbackEvent) {
+                if (d) {
+                    console.warn('Got suspend event, performing time fixup...');
+                }
+                self.currentTime += 0.1;
+            }
+
             // We used to handle stalled events... http://crbug.com/836951
             self.handleEvent({type: 'stalled', fake: 1, target: video});
         }
@@ -1113,16 +1134,29 @@ Object.defineProperty(Streamer.prototype, 'currentTime', {
         return video.currentTime - this.presentationOffset;
     },
     set: function(v) {
-        var video = this.video || false;
-        var stream = this.stream || false;
+        var self = this;
+        var video = self.video || false;
+        var stream = self.stream || false;
 
         if (stream instanceof AudioStream) {
             stream._stop();
             stream._play(v);
-            this.play();
+            self.play();
         }
         else if (video.readyState) {
-            video.currentTime = v + this.presentationOffset;
+            var time = v + self.presentationOffset;
+            video.currentTime = time;
+
+            // Attempt to deal with https://developer.microsoft.com/en-us/microsoft-edge/platform/issues/11459883
+            // I.e. The 'waiting' event may not actually be timely fired so we'll manually pump the track...
+            if (self.msie) {
+                stream._pump(time);
+            }
+
+            self.play();
+        }
+        else if (d) {
+            console.debug('Ignoring seek attempt, invalid state...');
         }
 
         this.playbackSeeking = true;

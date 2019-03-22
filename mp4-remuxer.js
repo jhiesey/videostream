@@ -140,6 +140,7 @@ RunLengthIndex.prototype.inc = function () {
 MP4Remuxer.prototype._processMoov = function (moov) {
 	var self = this
 	var mp3audio = {'mp4a.6b': 1, 'mp4a.69': 1};
+	var vcodecs = {'avc1': 1, 'av01': 1};
 	var traks = moov.traks || false;
 
 	if (moov.otherBoxes) {
@@ -166,10 +167,13 @@ MP4Remuxer.prototype._processMoov = function (moov) {
         if (d) {
             console.debug('handler=%s, type=%s, trak:', handlerType, stsdEntry.type, trak);
         }
-        if (!self._hasVideo && handlerType === 'vide' && stsdEntry.type === 'avc1') {
-			codec = 'avc1'
+        if (!self._hasVideo && handlerType === 'vide' && vcodecs[stsdEntry.type]) {
+			codec = stsdEntry.type
 			if (stsdEntry.avcC) {
 				codec += '.' + stsdEntry.avcC.mimeCodec
+			}
+			else if (stsdEntry.av1C) {
+				codec = stsdEntry.av1C.mimeCodec || codec;
 			}
 			mime = 'video/mp4; codecs="' + codec + '"'
             if (d) {
@@ -653,6 +657,61 @@ Box.boxes.co64.decode = function(buf, offset) {
         entries: entries
     }
 };
+
+Box.boxes.av1C = {};
+Box.boxes.av1C.encode = function _(box, buf, offset) {
+    buf = buf ? buf.slice(offset) : Buffer.allocUnsafe(box.buffer.length);
+    box.buffer.copy(buf);
+    _.bytes = box.buffer.length;
+};
+Box.boxes.av1C.decode = function (buf, offset, end) {
+    // https://aomediacodec.github.io/av1-isobmff/#codecsparam
+    var p = 0;
+    var r = Object.create(null);
+    var readUint8 = function() {
+        return buf.readUInt8(p++);
+    };
+    buf = buf.slice(offset, end);
+
+    var tmp = readUint8();
+    this.version = tmp & 0x7F;
+
+    if ((tmp >> 7) & 1 !== 1) {
+        console.warn('Invalid av1C marker.');
+    }
+    else if (this.version !== 1) {
+        console.warn('Unsupported av1C version %d.', this.version);
+    }
+    else {
+        tmp = readUint8();
+        r.seq_profile = (tmp >> 5) & 7;
+        r.seq_level_idx_0 = tmp & 0x1f;
+        tmp = readUint8();
+        r.seq_tier_0 = (tmp >> 7) & 1;
+        r.high_bitdepth = (tmp >> 6) & 1;
+        r.twelve_bit = (tmp >> 5) & 1;
+        r.monochrome = (tmp >> 4) & 1;
+        r.chroma_subsampling_x = (tmp >> 3) & 1;
+        r.chroma_subsampling_y = (tmp >> 2) & 1;
+        r.chroma_sample_position = (tmp & 3);
+        tmp = readUint8();
+        r.reserved = (tmp >> 5) & 7;
+        r.buffer = Buffer.from(buf);
+        tmp = r.high_bitdepth;
+        if (tmp < 10) tmp = 8;
+        r.mimeCodec = [
+            'av01',
+            r.seq_profile,
+            ('0' + r.seq_level_idx_0).slice(-2) + (!r.seq_tier_0 ? 'M' : 'H'),
+            ('0' + tmp).slice(-2)
+        ].join('.');
+    }
+    return r;
+};
+Box.boxes.av1C.encodingLength = function (box) {
+    return box.buffer.length;
+};
+Box.boxes.av01 = Box.boxes.VisualSampleEntry;
 
 Box.boxes.fullBoxes.sidx = true;
 Box.boxes.sidx = {};

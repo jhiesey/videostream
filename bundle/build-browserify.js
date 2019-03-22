@@ -202,7 +202,7 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
         // We don't need util.inspect...
         if (this.filename.indexOf('/readable-stream/lib/internal/streams/buffer_list.js') > 0) {
             chunk = "'use strict';\n" + buffer + chunk.substr(chunk.indexOf('function copyBuffer'));
-            chunk = chunk.replace("BufferList.prototype[custom]", 'if(0)var _');
+            chunk = chunk.replace("_proto[custom]", 'if(0)var _');
             chunk = chunk.replace('_classCallCheck', '0&&$&');
         }
 
@@ -320,7 +320,7 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
 
     // Remove debug calls
     chunk = chunk.replace("require('debug')", '');
-    chunk = chunk.replace(/^\s*debug\(.*\);$/gm, '');
+    chunk = chunk.replace(/^\s*debug\(.*\);/gm, '');
 
     // Let's remove dead code and such...
     const uglify = UglifyJS.minify(chunk, {

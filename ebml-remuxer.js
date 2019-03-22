@@ -55,7 +55,11 @@ EBMLRemuxer.prototype.emitInitSegment = function(segment) {
     }
 
     var getCodec = function(codec) {
-        return String(codec).substr(2).toLowerCase();
+        var c = String(codec).substr(2).toLowerCase();
+        if (c === 'av1') {
+            c = 'av01.0.00M.08';
+        }
+        return c;
     };
     var getMime = function(codec, type) {
         switch (codec) {
@@ -63,6 +67,7 @@ EBMLRemuxer.prototype.emitInitSegment = function(segment) {
             case 'A_OPUS':
             case 'V_VP8':
             case 'V_VP9':
+            case 'V_AV1':
                 return (type === 1 ? 'video' : 'audio') + '/webm; codecs="' + getCodec(codec) + '"';
         }
     };
@@ -581,6 +586,12 @@ MediaSegment.prototype.append = function(cluster, timecode, duration) {
 
     if (timecodeOffset > 0) {
         cs = cluster.readUInt16BE(timecodeOffset);
+        if ((cs >> 8) === 0xBF) {
+            if (d) {
+                console.debug(this + ' mkv timecode fixup (0x%s)', cluster.toString('hex', 0, timecodeOffset+9));
+            }
+            cs = cluster.readUInt16BE(timecodeOffset += 6);
+        }
         if ((cs >> 8) === 0xE7 && (cs & 0xff) > 0x7F) {
             // cluster.timecode = timecode * this.timescale;
             cluster.duration = 1;//duration * this.timescale;
