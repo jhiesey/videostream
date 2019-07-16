@@ -776,3 +776,26 @@ Box.boxes.sidx.decode = function(buf, offset) {
 
     return r;
 };
+
+Box.boxes.AudioSampleEntry.decode = function(buf, offset, end) {
+    buf = buf.slice(offset, end);
+    var length = end - offset;
+    var box = {
+        dataReferenceIndex: buf.readUInt16BE(6),
+        channelCount: buf.readUInt16BE(16),
+        sampleSize: buf.readUInt16BE(18),
+        sampleRate: buf.readUInt32BE(24),
+        children: []
+    };
+
+    var ptr = 28;
+    while (length - ptr >= 8) {
+        var child = Box.decode(buf, ptr, length);
+        if (!child.length) break; // BUGFIX: prevent endless loop with QT videos - FIXME
+        box.children.push(child);
+        box[child.type] = child;
+        ptr += child.length;
+    }
+
+    return box
+};

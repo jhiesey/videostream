@@ -214,6 +214,16 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
             chunk = chunk.replace("require('./internal/streams/async_iterator')", '0xBADF');
         }
 
+        // readable-stream 3.4.0 did borrow some code from end-fo-stream
+        if (this.filename.indexOf('/end-of-stream.js') > 0
+            || this.filename.indexOf('/pipeline.js') > 0) {
+
+            chunk = chunk.replace('function isRequest', 'if(0)x=function');
+            chunk = chunk.replace('isRequest(stream)', '0');
+            chunk = chunk.replace('function once', 'var once=require("once");if(0)x=$&');
+            // ^ the only difference is that their once function won't return the cached value, any issue?
+        }
+
         // readable-stream +3.x removed OurUint8Array out of an /*<replacement>*/ block..
         re = '([\n\\s]+var Buffer[^\n]+[\n\\s]+var OurUint8Array[\\s\\S]+?function _isUint8Array[^}]+\\})';
         chunk = chunk.replace(new RegExp(re), '\n\n/*<replacement>*/$1\n/*</replacement>*/\n');
@@ -325,9 +335,7 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
     // Let's remove dead code and such...
     const uglify = UglifyJS.minify(chunk, {
         warnings: true,
-        mangle: {
-            keep_fnames: true
-        },
+        mangle: false,
         compress: {
             passes: 2,
             loops: false,
