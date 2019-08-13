@@ -274,6 +274,11 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
         chunk = chunk.replace(/var \w+ = require\('buffer-(?:alloc|from)'\)/g, '');
         chunk = chunk.replace(/\bbufferAlloc\b/g, 'Buffer.allocUnsafe');
         chunk = chunk.replace(/\bbufferFrom\b/g, 'Buffer.from');
+
+        // mp4-box-encoding 1.4.1 removed buffer-alloc|from dependency - we can still use the unsafe call
+        if (this.filename.indexOf('mp4-box-encoding') > 0) {
+            chunk = chunk.replace(/\bBuffer.alloc\(/g, 'Buffer.allocUnsafe(');
+        }
     }
 
     // Replace references to process.* and explicitly include Buffer to prevent a closure

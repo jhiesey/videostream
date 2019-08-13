@@ -32,6 +32,7 @@ function AudioStream(file, mediaElem, opts) {
     self._videoStream = null;
     self._audioStream = null;
     self._outputStream = null;
+    self._videoCanvas = null;
     self._videoContext = null;
     self._audioContext = context;
     self._audioAnalyser = null;
@@ -125,17 +126,17 @@ AudioStream.prototype._setup = function(autoplay, buffer) {
     var elm = self._elem;
     var audioContext = self._audioContext;
     var audioStream = audioContext.createMediaStreamDestination();
-    var videoContext = document.createElement('canvas');
-    var videoStream = videoContext.captureStream(30);
+    var videoCanvas = document.createElement('canvas');
+    var videoContext = videoCanvas.getContext('2d');
+    var videoStream = videoCanvas.captureStream(25);
     var tracks = [audioStream.stream.getTracks()[0], videoStream.getTracks()[0]];
     var audioAnalyser = audioContext.createAnalyser();
 
     // log('setup', buffer, autoplay, tracks);
 
-    audioStream.connect(audioContext.destination);
-
     self._visualiser = new Visualiser(self);
     self._audioAnalyser = audioAnalyser;
+    self._videoCanvas = videoCanvas;
     self._videoContext = videoContext;
     self._videoStream = videoStream;
     self._audioStream = audioStream;
@@ -283,14 +284,13 @@ AudioVisualiser.prototype._draw = function() {
     var tick = ++self._tick;
     var stream = self._stream;
     var videoElement = stream._elem;
-    var canvas = stream._videoContext;
+    var ctx = stream._videoContext;
+    var canvas = stream._videoCanvas;
     var analiser = stream._audioAnalyser;
     var $video = $(videoElement).parent();
 
     canvas.width = $video.outerWidth() + 16 & -16;
     canvas.height = $video.outerHeight() + 16 & -16;
-
-    var ctx = canvas.getContext('2d');
 
     self.init(ctx, canvas.width, canvas.height, canvas);
 
