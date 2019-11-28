@@ -78,6 +78,12 @@ function AudioStream(file, mediaElem, opts) {
     mediaElem.addEventListener('play', self._onPlay);
     mediaElem.addEventListener('pause', self._onPause);
     mediaElem.addEventListener('error', self._onError);
+
+    if (context.state === 'suspended') {
+        onIdle(function() {
+            context.resume();
+        });
+    }
 }
 
 inherits(AudioStream, EventEmitter);
@@ -101,7 +107,10 @@ AudioStream.prototype.destroy = function(err) {
 
         var audioStream = self._audioStream;
         if (audioStream) {
-            audioStream.disconnect();
+            try {
+                audioStream.disconnect();
+            }
+            catch (ex) {}
         }
 
         var visualiser = self._visualiser;
@@ -141,6 +150,11 @@ AudioStream.prototype._setup = function(autoplay, buffer) {
     self._videoStream = videoStream;
     self._audioStream = audioStream;
     self._audioBuffer = buffer;
+
+    if (audioStream.numberOfOutputs > 0) {
+        // legacy Web Audio API support.
+        self._audioStream = audioContext.destination;
+    }
     self._play(0);
 
     if (!autoplay) {
@@ -165,8 +179,11 @@ AudioStream.prototype._stop = function() {
     var visualiser = self._visualiser;
 
     if (audioSource) {
-        audioSource.disconnect();
-        audioSource.stop(0);
+        try {
+            audioSource.disconnect();
+            audioSource.stop(0);
+        }
+        catch (ex) {}
     }
 
     if (visualiser) {
@@ -442,3 +459,8 @@ Star.prototype.drawStar = function() {
         this.angle = Math.atan(Math.abs(this.y) / Math.abs(this.x));
     }
 };
+
+
+onIdle(function() {
+    require('promise-decode-audio-data');
+});

@@ -900,8 +900,15 @@ Streamer.prototype.play = function() {
     // Failed to execute 'play' on 'HTMLMediaElement': API can only be initiated by a user gesture.
     try {
         var self = this;
-        var video = self.video;
-        var promise = video.play();
+        var stream = self.stream;
+        if (stream instanceof AudioStream) {
+            var ctx = stream._audioContext || false;
+
+            if (ctx.state === 'suspended') {
+                ctx.resume();
+            }
+        }
+        var promise = self.video.play();
 
         if (typeof Promise !== 'undefined' && promise instanceof Promise) {
             promise.then(function() {

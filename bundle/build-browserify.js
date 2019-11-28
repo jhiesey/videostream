@@ -168,6 +168,20 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
         chunk = chunk.replace('isChildProcess(stream)', '0');
         chunk = chunk.replace('var isRequest = ', 'if(0)x=');
         chunk = chunk.replace('var isChildProcess = ', 'if(0)x=');
+        chunk = chunk.replace('process.nextTick(onclosenexttick)', 'onIdle(onclosenexttick)');
+    }
+
+    // Remove 'global' references
+    if (this.filename.indexOf('/base-audio-context/index.js') > 0
+        || this.filename.indexOf('/promise-decode-audio-data/index.js') > 0) {
+
+        chunk = chunk.replace(/\bglobal\./g, 'window.');
+
+        if (this.filename.indexOf('/promise-decode-audio-data/index.js') > 0) {
+            // Apply some compatibility tweaks
+            chunk = chunk.replace(', reject);', ', reject.bind(null, Error("Legacy WebAudio API decoding error")));');
+            chunk = chunk.replace('promise.then(', '//');
+        }
     }
 
     // Let's apply some micro optimizations...
@@ -342,7 +356,7 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
         warnings: true,
         mangle: false,
         compress: {
-            passes: 2,
+            passes: 3,
             loops: false,
             sequences: false,
             comparisons: false,
