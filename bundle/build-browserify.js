@@ -225,6 +225,7 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
             chunk = chunk.replace("var _require2 = require('../experimentalWarning'),", '');
             chunk = chunk.replace("emitExperimentalWarning = _require2.emitExperimentalWarning;", '');
             chunk = chunk.replace('Readable.prototype[Symbol.asyncIterator]', 'if(0)var _');
+            chunk = chunk.replace('Readable.from =', 'if(0)_=');
             chunk = chunk.replace("require('./internal/streams/async_iterator')", '0xBADF');
         }
 

@@ -528,7 +528,10 @@ function Streamer(data, video, options) {
     }
     this.gecko = uad.engine === 'Gecko';
     this.msie = "ActiveXObject" in window || window.MSBlobBuilder;
-    this.options = Object.assign(Object.create(null), {autoplay: true}, options);
+    this.options = options || Object.create(null);
+    if (this.options.autoplay === undefined) {
+        this.options.autoplay = true;
+    }
 
     this._events = [
         'progress', 'timeupdate', 'canplay', 'pause', 'playing', 'error',
@@ -917,6 +920,10 @@ Streamer.prototype.play = function() {
                         secondsToTime(self.currentTime),
                         secondsToTime(self.duration));
                 }
+                if (stream instanceof AudioStream) {
+                    // XXX: if no autoplay, it then *may* does fail to play on demand - enough fixup?
+                    stream._play(self.currentTime);
+                }
             }).catch(function(ex) {
                 if (d) {
                     console.debug('video.play() failed...', ex);
@@ -996,6 +1003,11 @@ Streamer.prototype._clearActivityTimer = function() {
 
 Streamer.prototype._setActivityTimer = function() {
     var self = this;
+    var stream = self.stream;
+    if (stream instanceof AudioStream) {
+        // audio files cannot get into buffering...
+        return;
+    }
 
     this._clearActivityTimer();
     this.activitimer = setTimeout(function() {
@@ -1122,6 +1134,49 @@ Streamer.prototype.getProperty = function(key) {
     return false;
 };
 
+Object.defineProperty(Streamer.prototype, 'gain', {
+    set: function(v) {
+        var stream = this.stream;
+
+        if (stream instanceof AudioStream) {
+            var sn = stream._audioSource || false;
+
+            if (sn.gain) {
+                sn.gain.value = v;
+            }
+        }
+    }
+});
+
+Object.defineProperty(Streamer.prototype, 'volume', {
+    get: function() {
+        return (this.video || false).volume;
+    },
+    set: function(v) {
+        var video = this.video || false;
+        var vol = v < 0.1 ? 0.1 : v > 1.0 ? 1.0 : v;
+
+        this.gain = vol;
+        video.volume = vol;
+    }
+});
+
+Object.defineProperty(Streamer.prototype, 'muted', {
+    get: function() {
+        return (this.video || false).muted;
+    },
+    set: function(v) {
+        var video = this.video || false;
+
+        if (v === -1) {
+            v = !this.muted;
+        }
+
+        this.gain = !v;
+        video.muted = v;
+    }
+});
+
 Object.defineProperty(Streamer.prototype, 'duration', {
     get: function() {
         var video = this.video || false;
@@ -1146,7 +1201,6 @@ Object.defineProperty(Streamer.prototype, 'currentTime', {
         var stream = self.stream || false;
 
         if (stream instanceof AudioStream) {
-            stream._stop();
             stream._play(v);
             self.play();
         }

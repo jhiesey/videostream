@@ -53,7 +53,7 @@ function AudioStream(file, mediaElem, opts) {
         self._buffer = null;
 
         self.emit('audio-buffer', buffer);
-        context.decodeAudioData(buffer).then(self._setup.bind(self, opts.autoplay)).catch(destroy);
+        context.decodeAudioData(buffer).then(self._setup.bind(self, opts.autoplay, opts.startTime)).catch(destroy);
     }, destroy));
 
     self._onError = function(err) {
@@ -130,14 +130,14 @@ AudioStream.prototype.destroy = function(err) {
     }
 };
 
-AudioStream.prototype._setup = function(autoplay, buffer) {
+AudioStream.prototype._setup = function(autoplay, time, buffer) {
     var self = this;
     var elm = self._elem;
     var audioContext = self._audioContext;
     var audioStream = audioContext.createMediaStreamDestination();
     var videoCanvas = document.createElement('canvas');
     var videoContext = videoCanvas.getContext('2d');
-    var videoStream = videoCanvas.captureStream(25);
+    var videoStream = self._captureStream(videoCanvas);
     var tracks = [audioStream.stream.getTracks()[0], videoStream.getTracks()[0]];
     var audioAnalyser = audioContext.createAnalyser();
 
@@ -155,7 +155,7 @@ AudioStream.prototype._setup = function(autoplay, buffer) {
         // legacy Web Audio API support.
         self._audioStream = audioContext.destination;
     }
-    self._play(0);
+    self._play(time | 0);
 
     if (!autoplay) {
         self._onPause();
@@ -207,6 +207,7 @@ AudioStream.prototype._play = function(time) {
         log('Cannot play, audio buffer not yet ready.');
         return;
     }
+    this._stop();
 
     source.buffer = audioBuffer;
     source.connect(self._audioAnalyser);
@@ -221,6 +222,34 @@ AudioStream.prototype._play = function(time) {
     if (visualiser) {
         visualiser._start();
     }
+};
+
+AudioStream.prototype._captureStream = function(canvas) {
+    var stream;
+
+    try {
+        var t = window.CanvasCaptureMediaStreamTrack;
+        if (t && typeof t.prototype.requestFrame === 'function') {
+            var tmp = canvas.captureStream(0);
+            var track = tmp.getTracks()[0];
+
+            track.requestFrame();
+            this.requestFrame = function() {
+                track.requestFrame();
+            };
+            stream = tmp;
+        }
+    }
+    catch (ex) {
+        log(ex);
+    }
+
+    if (!stream) {
+        log('This browser does lack CanvasCaptureMediaStreamTrack.requestFrame');
+        stream = canvas.captureStream(24);
+    }
+
+    return stream;
 };
 
 Object.defineProperty(AudioStream.prototype, 'currentTime', {
@@ -254,8 +283,11 @@ function AudioVisualiser(stream, fftSize) {
 
     self._tick = 0;
     self._image = null;
+    self._barWidth = 4;
+    self._byteData = null;
     self._stream = stream;
-    self._fftSize = fftSize || 0x4000;
+    self._fftSize = fftSize || 0x1000;
+    self._hasFocus = document.hasFocus();
 
     /*if (videoElement.poster) {
         var img = new Image();
@@ -270,10 +302,18 @@ function AudioVisualiser(stream, fftSize) {
     self._onResize = function() {
         clearTimeout(timer);
         timer = setTimeout(function() {
-            self._draw();
+            self._start();
         }, 50);
     };
     window.addEventListener('resize', self._onResize);
+
+    window.addEventListener('focus', self._onFocus = function() {
+        self._hasFocus = true;
+    });
+
+    window.addEventListener('blur', self._onBlur = function() {
+        self._hasFocus = false;
+    });
 }
 
 inherits(AudioVisualiser, null);
@@ -283,17 +323,21 @@ AudioVisualiser.prototype.destroy = function() {
 
     if (!self.destroyed) {
         self.destroyed = true;
-        self._tick = null;
+        window.removeEventListener('blur', self._onBlur);
+        window.removeEventListener('focus', self._onFocus);
         window.removeEventListener('resize', self._onResize);
+        self._stop();
     }
 };
 
 AudioVisualiser.prototype._start = function() {
+    this._stop();
     this._draw();
 };
 
 AudioVisualiser.prototype._stop = function() {
-    this._tick = -1;
+    this._tick++;
+    this._byteData = false;
 };
 
 AudioVisualiser.prototype._draw = function() {
@@ -303,7 +347,7 @@ AudioVisualiser.prototype._draw = function() {
     var videoElement = stream._elem;
     var ctx = stream._videoContext;
     var canvas = stream._videoCanvas;
-    var analiser = stream._audioAnalyser;
+    var analyser = stream._audioAnalyser;
     var $video = $(videoElement).parent();
 
     canvas.width = $video.outerWidth() + 16 & -16;
@@ -313,14 +357,29 @@ AudioVisualiser.prototype._draw = function() {
 
     // log('draw', canvas.width, canvas.height, self);
 
-    analiser.fftSize = self._fftSize;
+    analyser.fftSize = self._fftSize;
+    analyser.smoothingTimeConstant = 0.85;
+
+    self._byteData = new Uint8Array(analyser.frequencyBinCount);
+    self._barWidth = Math.max(4, (canvas.width / self._byteData.byteLength) * 8);
 
     (function _draw() {
         if (tick === self._tick) {
-            requestAnimationFrame(_draw);
-            var data = new Uint8Array(analiser.frequencyBinCount);
-            analiser.getByteFrequencyData(data);
-            self.draw(data, ctx, canvas.width, canvas.height, canvas);
+            self.draw(ctx, canvas.width, canvas.height);
+
+            if (stream.requestFrame) {
+                stream.requestFrame();
+
+                if (self._hasFocus) {
+                    setTimeout(_draw, 60);
+                }
+                else {
+                    later(_draw);
+                }
+            }
+            else {
+                requestAnimationFrame(_draw);
+            }
         }
     })();
 };
@@ -340,6 +399,7 @@ Visualiser.prototype.init = function(ctx, width, height, canvas) {
     _gradient.addColorStop(0.75, 'rgba(26, 24, 24, 0.8)');
     this.gradient = _gradient;
 
+    /**
     var i = width / 24, x, y, s, stars = [];
     while (i-- > 0) {
         x = (Math.random() - 0.5) * width;
@@ -348,9 +408,19 @@ Visualiser.prototype.init = function(ctx, width, height, canvas) {
         stars.push(new Star(x, y, s, ctx, width, height, this));
     }
     this.stars = stars;
+    /**/
 };
 
-Visualiser.prototype.draw = function(data, ctx, width, height, canvas) {
+Visualiser.prototype.draw = function(ctx, width, height) {
+    ctx.clearRect(0, 0, width, height);
+    if (!this._hasFocus) {
+        return;
+    }
+    var data = this._byteData;
+    var stream = this._stream;
+    var analyser = stream._audioAnalyser;
+    analyser.getByteFrequencyData(data);
+
     var value, grd, vol = 0, r, g, b, i = data.byteLength;
 
     for (r = 0; r < 80; r++) vol += data[r];
@@ -361,8 +431,7 @@ Visualiser.prototype.draw = function(data, ctx, width, height, canvas) {
     g = r;//value * 2;
     b = r;//value * 8;
 
-    ctx.clearRect(0, 0, width, height);
-
+    /**
     ctx.beginPath();
     ctx.rect(0, 0, width, height);
 
@@ -373,18 +442,19 @@ Visualiser.prototype.draw = function(data, ctx, width, height, canvas) {
     ctx.fillStyle = grd;
     ctx.fill();
     ctx.closePath();
+    /**/
 
     ctx.beginPath();
     ctx.fillStyle = this.gradient;
 
+    r = this._barWidth;
     while (i--) {
         value = data[i] / 1.4;
-        ctx.fillRect(i * 5, (height - value) / 1.2, 4, value / 1.3);
+        ctx.fillRect(i * (r + 1), (height - value) / 1.2, r, value / 1.3);
     }
     ctx.closePath();
 
-    var analyser = this._stream._audioAnalyser;
-    data = new Uint8Array(analyser.frequencyBinCount);
+    /**/
     analyser.getByteTimeDomainData(data);
 
     ctx.beginPath();
@@ -395,10 +465,13 @@ Visualiser.prototype.draw = function(data, ctx, width, height, canvas) {
     i = data.byteLength;
     while (i--) {
         ctx.lineTo(i, height - data[i]);
+        // ctx.lineTo(i << 1, height - data[i]);
     }
     ctx.stroke();
     ctx.closePath();
+    /**/
 
+    /**
     ctx.beginPath();
     ctx.translate(width / 2, height / 2);
 
@@ -406,6 +479,7 @@ Visualiser.prototype.draw = function(data, ctx, width, height, canvas) {
         this.stars[r].drawStar();
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    /**/
 };
 
 // based on https://github.com/michaelbromley/soundcloud-visualizer
