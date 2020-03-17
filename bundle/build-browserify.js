@@ -17,6 +17,16 @@ const babelOptions = {
 };
 let files = 0, sizes = 0, error = 0;
 
+function _createClass(c, p) {
+    for (var i = p.length; i--;) {
+        var d = p[i];
+        if (!d) continue;
+        d.writable = true;
+        d.configurable = true;
+        Object.defineProperty(c.prototype, d.key, d);
+    }
+}
+
 // Starts bundle creation
 function makeBundle() {
     const b = new Browserify('./bundle/main.js');
@@ -216,7 +226,7 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
         // We don't need util.inspect...
         if (this.filename.indexOf('/readable-stream/lib/internal/streams/buffer_list.js') > 0) {
             chunk = "'use strict';\n" + buffer + chunk.substr(chunk.indexOf('function copyBuffer'));
-            chunk = chunk.replace("_proto[custom]", 'if(0)var _');
+            chunk = chunk.replace(/}, {\s*?key: custom,/, '},0&&{') + _createClass.toString();
             chunk = chunk.replace('_classCallCheck', '0&&$&');
         }
 

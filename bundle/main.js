@@ -234,7 +234,11 @@ VideoFile.prototype.cachefind = function cachefind(pos) {
         var mid = (min + max) >> 1;
 
         if (pos >= this.cachepos[mid]) {
-            if (pos < this.cachepos[mid] + this.cache[this.cachepos[mid]].byteLength) {
+            var n = this.cache[this.cachepos[mid]];
+            if (!n) {
+                return -1;
+            }
+            if (pos < this.cachepos[mid] + n.byteLength) {
                 return mid;
             }
             min = mid + 1;
@@ -720,7 +724,7 @@ Streamer.prototype.destroy = function() {
 
     if (this.video) {
         for (i = this._events.length; i--;) {
-            this.video.removeEventListener(this._events[i], this);
+            this.video.removeEventListener(this._events[i], this, false);
         }
 
         // recreate the video element to prevent possible leaks..
@@ -791,6 +795,13 @@ Streamer.prototype.handleEvent = function(ev) {
         console.debug('Event(%s)', ev.type, target, ev);
     }
     this.state = ev.type;
+
+    if (!videoFile) {
+        if (d) {
+            console.warn('VideoFile instance is not available, already destroyed?', ev.type, [this]);
+        }
+        return false;
+    }
 
     switch (ev.type) {
         case 'seeking':
@@ -951,13 +962,15 @@ Streamer.prototype.play = function() {
 };
 
 Streamer.prototype.on = function(ev, success, error) {
-    success = tryCatch(success.bind(this), error);
+    if (this.evs) {
+        success = tryCatch(success.bind(this), error);
 
-    if (this.evs[ev]) {
-        this.evs[ev].push(success);
-    }
-    else {
-        this.evs[ev] = [success];
+        if (this.evs[ev]) {
+            this.evs[ev].push(success);
+        }
+        else {
+            this.evs[ev] = [success];
+        }
     }
 
     return this;
