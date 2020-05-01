@@ -397,7 +397,9 @@ VideoFile.prototype.fetch = function fetch(startpos, recycle) {
 
     if (length < 1) {
         if (length < 0) {
-            console.error("*** Mediacache: Internal error - out of bound.", startpos, pos, length);
+            if (d && this.filesize >= 0) {
+                console.error("*** Mediacache: Internal error - out of bound.", startpos, pos, length);
+            }
         }
         return;
     }
