@@ -178,7 +178,10 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
         chunk = chunk.replace('isChildProcess(stream)', '0');
         chunk = chunk.replace('var isRequest = ', 'if(0)x=');
         chunk = chunk.replace('var isChildProcess = ', 'if(0)x=');
-        chunk = chunk.replace('process.nextTick(onclosenexttick)', 'onIdle(onclosenexttick)');
+        chunk = chunk.replace('process.nextTick(onclosenexttick)', 'vsNT(onclosenexttick)');
+
+        // fixme: https://github.com/mafintosh/end-of-stream/issues/30
+        chunk = chunk.replace('&& !rs.destroyed', '');
     }
 
     // Remove 'global' references
@@ -221,7 +224,7 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
 
         // Replace process.nextTick calls not covered by the above
         re = q('process.nextTick(') + '([^,]+?)(,[^)]+?)?\\)';
-        chunk = chunk.replace(new RegExp(re, 'g'), 'onIdleA($1.bind(null$2))');
+        chunk = chunk.replace(new RegExp(re, 'g'), 'vsNT($1.bind(null$2))');
 
         // We don't need util.inspect...
         if (this.filename.indexOf('/readable-stream/lib/internal/streams/buffer_list.js') > 0) {

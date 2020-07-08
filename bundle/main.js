@@ -828,8 +828,12 @@ Streamer.prototype.handleEvent = function(ev) {
             target.removeEventListener('progress', this);
 
             if (d > 1) {
-                this.stream._elemWrapper._mediaSource.addEventListener('sourceclose', console.warn.bind(console));
-                this.stream._elemWrapper._mediaSource.addEventListener('sourceended', console.warn.bind(console));
+                var ew = this.stream._elemWrapper;
+                var ms = ew && ew._mediaSource;
+                if (ms) {
+                    ms.addEventListener('sourceclose', console.warn.bind(console));
+                    ms.addEventListener('sourceended', console.warn.bind(console));
+                }
             }
 
             if (videoFile.playing) {
@@ -1172,7 +1176,9 @@ Object.defineProperty(Streamer.prototype, 'volume', {
         var vol = v < 0.1 ? 0.1 : v > 1.0 ? 1.0 : v;
 
         this.gain = vol;
-        video.volume = vol;
+        if (video) {
+            video.volume = vol;
+        }
     }
 });
 
@@ -1188,7 +1194,9 @@ Object.defineProperty(Streamer.prototype, 'muted', {
         }
 
         this.gain = !v;
-        video.muted = v;
+        if (video) {
+            video.muted = v;
+        }
     }
 });
 

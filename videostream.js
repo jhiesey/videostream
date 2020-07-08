@@ -215,7 +215,7 @@ VideoStream.prototype._pump = function(time) {
         }
         time = video.currentTime;
 
-        if (self._type !== 'WebM' || !this.withinBufferedRange(time)) {
+        if (this._type !== 'WebM' || !this.withinBufferedRange(time)) {
             this._tryPump(time);
         }
         else if (d) {

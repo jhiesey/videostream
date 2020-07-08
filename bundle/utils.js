@@ -1,14 +1,21 @@
 var Buffer = require('buffer').Buffer;
 
+var cbs = [];
+var tbsp = Promise.resolve();
 var onNextTick = function(cb) {
-    setTimeout(cb, 0);
+    // console.warn('xyz add', cbs.length, cb);
+    if (cbs.push(cb) === 1) {
+        tbsp.then(function() {
+            var q = cbs;
+            cbs = [];
+            // console.warn('xyz dsp', q.length, q);
+            for (var i = 0; i < q.length; ++i) {
+                q[i]();
+            }
+        });
+    }
 };
-
-if (typeof requestIdleCallback !== 'undefined') {
-    onNextTick = function(cb) {
-        requestIdleCallback(function() { cb() });
-    };
-}
+Object.defineProperty(window, 'vsNT', {value: onNextTick});
 
 var utils = {
     debuglog: function(name) {
@@ -31,7 +38,7 @@ var utils = {
             onNextTick(cb);
         }
     },
-    inherit: function(target, source) {
+    inherit: window.inherits || function(target, source) {
         target.prototype = Object.create(source && source.prototype || source);
         Object.defineProperty(target.prototype, 'constructor', {
             value: target,
