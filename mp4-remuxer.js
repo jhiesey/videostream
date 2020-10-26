@@ -5,6 +5,7 @@ var mp4 = require('mp4-stream')
 var Box = require('mp4-box-encoding')
 var RangeSliceStream = require('range-slice-stream')
 var Buffer = require('buffer').Buffer
+var locale = require('./bundle/locale');
 
 // if we want to ignore more than this many bytes, request a new stream.
 // if we want to ignore fewer, just skip them.
@@ -137,10 +138,129 @@ RunLengthIndex.prototype.inc = function () {
 	self.value = self._entries[self._index] || false;
 }
 
+MP4Remuxer.prototype._processTracks = function(traks) {
+    var self = this;
+    var mime, codec, audio = [];
+    var hevc = Object.assign(Object.create(null), {'hvc1': 1, 'hev1': 1});
+    var vide = Object.assign(Object.create(null), {'avc1': 1, 'av01': 1}, hevc);
+    var mp3a = Object.assign(Object.create(null), {'mp4a.6b': 1, 'mp4a.69': 1});
+
+    var validateAudioTrack = function(trk) {
+        if (!trk) {
+            return false;
+        }
+
+        var mime = trk.mime;
+        if (!MediaSource.isTypeSupported(mime)) {
+            if (trk.codec !== 'mp3' || !MediaSource.isTypeSupported(mime = 'audio/mpeg')) {
+                // Let's continue without audio if actually unsupported, e.g. mp4a.6B (MP3)
+                self._hasUnsupportedAudio = trk.codec;
+                return false;
+            }
+            trk.mime = mime;
+        }
+
+        if (self._hasVideo && hevc[self._hasVideo.type]) {
+            mime = self._hasVideo.mime.replace(/"$/, ', ' + trk.codec + '"');
+
+            // @todo DTS (aka mp4a.a9 (dca)) if supposed to work..
+            if (trk.codec === 'mp4a.a9' || !MediaSource.isTypeSupported(mime)) {
+                if (d) {
+                    console.warn('[hevc] unsupported audio track.', mime);
+                }
+                self._hasUnsupportedAudio = self._hasVideo.type + ':' + trk.codec;
+                return false;
+            }
+        }
+
+        return trk;
+    };
+
+    for (var i = 0; i < traks.length; i++) {
+        var trak = traks[i];
+        var mdia = trak.mdia || false;
+        var stbl = trak.mdia.minf.stbl;
+        var stsd = stbl.stsd.entries[0];
+        var lang = Object(mdia.mdhd).language;
+        var type = Object(mdia.hdlr).handlerType;
+
+        if (type === 'vide' && vide[stsd.type]) {
+            codec = stsd.type;
+            if (stsd.avcC) {
+                codec += '.' + stsd.avcC.mimeCodec
+            }
+            else if (stsd.av1C) {
+                codec = stsd.av1C.mimeCodec || codec;
+            }
+            else if (stsd.hvcC) {
+                codec += stsd.hvcC.mimeCodec;
+            }
+
+            mime = 'video/mp4; codecs="' + codec + '"';
+            if (d) {
+                console.debug('Track%d: %s %s', i, locale.decodeMP4LangCode(lang), mime);
+            }
+
+            if (!self._hasVideo) {
+                self._hasVideo = {type: stsd.type, codec: codec, mime: mime, trak: trak, lang: lang, idx: i};
+            }
+        }
+        else if (type === 'soun') {
+            codec = stsd.type;
+
+            if (stsd.type === 'mp4a') {
+                codec = 'mp4a';
+
+                if (stsd.esds && stsd.esds.mimeCodec) {
+                    codec += '.' + stsd.esds.mimeCodec
+                }
+
+                if (mp3a[codec]) {
+                    // Firefox allows mp3 in mp4 this way
+                    codec = 'mp3'
+                }
+            }
+            else if (stsd.type === 'fLaC') {
+                codec = 'flac';
+            }
+
+            mime = 'audio/mp4; codecs="' + codec + '"';
+            if (d) {
+                console.debug('Track%d: %s %s', i, locale.decodeMP4LangCode(lang), mime);
+            }
+
+            audio.push({type: stsd.type, codec: codec, mime: mime, trak: trak, lang: lang, idx: i});
+        }
+    }
+
+    if (audio.length < 2) {
+        self._hasAudio = validateAudioTrack(audio[0]);
+        return;
+    }
+
+    var eng, def, und;
+    for (var j = 0; j < audio.length; ++j) {
+        var trk = validateAudioTrack(audio[j]);
+        if (trk) {
+            var lng = locale.decodeMP4LangCode(trk.lang);
+
+            if (!eng && lng === 'eng') {
+                eng = trk;
+            }
+
+            if (!def && locale.bcp47match(lng)) {
+                def = trk;
+            }
+
+            und = und || trk;
+        }
+    }
+
+    self._hasAudio = def || eng || und;
+};
+
 MP4Remuxer.prototype._processMoov = function (moov) {
 	var self = this
-	var mp3audio = {'mp4a.6b': 1, 'mp4a.69': 1};
-	var vcodecs = {'avc1': 1, 'av01': 1};
 	var traks = moov.traks || false;
 
 	if (moov.otherBoxes) {
@@ -155,6 +275,10 @@ MP4Remuxer.prototype._processMoov = function (moov) {
 	self._tracks = []
 	self._hasVideo = false
 	self._hasAudio = false
+	self._processTracks(traks);
+	if (d) {
+		console.debug('video%s:%s, audio%s:%s', self._hasVideo.idx, self._hasVideo.codec, self._hasAudio.idx, self._hasAudio.codec);
+	}
 
 	for (var i = 0; i < traks.length; i++) {
 		var trak = traks[i]
@@ -162,59 +286,21 @@ MP4Remuxer.prototype._processMoov = function (moov) {
 		var stco = stbl.stco || stbl.co64;
 		var stsdEntry = stbl.stsd.entries[0]
 		var handlerType = trak.mdia.hdlr.handlerType
-		var codec
 		var mime
         if (d) {
             console.debug('handler=%s, type=%s, trak:', handlerType, stsdEntry.type, trak);
         }
-        if (!self._hasVideo && handlerType === 'vide' && vcodecs[stsdEntry.type]) {
-			codec = stsdEntry.type
-			if (stsdEntry.avcC) {
-				codec += '.' + stsdEntry.avcC.mimeCodec
-			}
-			else if (stsdEntry.av1C) {
-				codec = stsdEntry.av1C.mimeCodec || codec;
-			}
-			mime = 'video/mp4; codecs="' + codec + '"'
-            if (d) {
-                console.debug(mime);
-            }
-            self._hasVideo = codec;
+        if (self._hasVideo && self._hasVideo.trak === trak) {
+            mime = self._hasVideo.mime;
+            self._hasVideo = self._hasVideo.codec;
         }
-        else if (!self._hasAudio && handlerType === 'soun') {
-            mime = 'audio/mp4; codecs="%"';
-            if (stsdEntry.type === 'mp4a') {
-                codec = 'mp4a'
-                if (stsdEntry.esds && stsdEntry.esds.mimeCodec) {
-                    codec += '.' + stsdEntry.esds.mimeCodec
-                }
-                // Even though MSIE/Edge does support mp4a.6b/mp4a.69, it doesn't seem to like the way we feed MSE
-                if (mp3audio[codec] /*&& !MediaSource.isTypeSupported(mime.replace('%', codec))*/) {
-                    // Firefox allows mp3 in mp4 this way
-                    codec = 'mp3'
-                }
-            }
-            else if (stsdEntry.type === 'fLaC') {
-                codec = 'flac';
-			}
-            else {
-                codec = stsdEntry.type;
-            }
-            mime = mime.replace('%', codec);
-            if (d) {
-                console.debug(mime);
-            }
-            if (!MediaSource.isTypeSupported(mime)) {
-                if (codec !== 'mp3' || !MediaSource.isTypeSupported(mime = 'audio/mpeg')) {
-                    // Let's continue without audio if actually unsupported, e.g. mp4a.6B (MP3)
-                    self._hasUnsupportedAudio = codec;
-                    continue;
-                }
-            }
-            self._hasAudio = codec;
-		} else {
-			continue
-		}
+        else if (self._hasAudio && self._hasAudio.trak === trak) {
+            mime = self._hasAudio.mime;
+            self._hasAudio = self._hasAudio.codec;
+        }
+        else {
+            continue
+        }
 
 		var samples = []
 		var sample = 0
@@ -712,6 +798,98 @@ Box.boxes.av1C.encodingLength = function (box) {
     return box.buffer.length;
 };
 Box.boxes.av01 = Box.boxes.VisualSampleEntry;
+
+Box.boxes.hvcC = {};
+Box.boxes.hvcC.encode = function _(box, buf, offset) {
+    buf = buf ? buf.slice(offset) : Buffer.allocUnsafe(box.buffer.length);
+    box.buffer.copy(buf);
+    _.bytes = box.buffer.length;
+};
+Box.boxes.hvcC.decode = function(buf, offset, end) {
+    // https://www.iso.org/standard/65216.html
+    var p = 0;
+    var r = Object.create(null);
+    var readUint8 = function() {
+        return buf.readUInt8(p++);
+    };
+    var readUint8Array = function(len) {
+        var out = new Uint8Array(len);
+        for (var i = 0; i < len; i++) {
+            out[i] = readUint8();
+        }
+        return out;
+    };
+    var readUint16 = function() {
+        var v = buf.readUInt16BE(p);
+        p += 2;
+        return v;
+    };
+    var readUint32 = function() {
+        var v = buf.readUInt32BE(p);
+        p += 4;
+        return v;
+    };
+    buf = buf.slice(offset, end);
+
+    var tmp = readUint8();
+    this.version = tmp & 0xFF;
+    r.configurationVersion = this.version;
+
+    tmp = readUint8();
+    r.profile_space = tmp >> 6;
+    r.tier_flag = (tmp & 32) >> 5;
+    r.profile_idc = (tmp & 0x1f);
+    r.profile_compatibility_indications = readUint32();
+    r.constraint_indicator_flags = readUint8Array(6);
+    r.level_idc = readUint8();
+    r.min_spatial_segmentation_idc = readUint16() & 0xfff;
+    r.parallelismType = (readUint8() & 3);
+    r.chromaFormat = (readUint8() & 3);
+    r.bitDepthLumaMinus8 = (readUint8() & 7);
+    r.bitDepthChromaMinus8 = (readUint8() & 7);
+    r.avgFrameRate = readUint16();
+
+    tmp = readUint8();
+    r.constantFrameRate = (tmp >> 6);
+    r.numTemporalLayers = (tmp & 13) >> 3;
+    r.temporalIdNested = (tmp & 4) >> 2;
+    r.lengthSizeMinusOne = (tmp & 3);
+    r.buffer = Buffer.from(buf);
+
+    // e.g. 'hvc1.1.6.L93.90';
+    var mime = '.';
+    if (r.profile_space) {
+        mime += String.fromCharCode(64 + r.profile_space);
+    }
+    mime += r.profile_idc + '.';
+
+    tmp = 0;
+    var j = 0, cpl = r.profile_compatibility_indications;
+    while (true) {
+        tmp = cpl & 1;
+        if (++j > 30) {
+            break;
+        }
+        tmp <<= 1;
+        cpl >>= 1;
+    }
+    mime += tmp.toString(16) + '.' + (r.tier_flag ? 'H' : 'L') + r.level_idc;
+
+    tmp = '';
+    cpl = r.constraint_indicator_flags;
+    for (j = 5; j >= 0; j--) {
+        if (cpl[j] || tmp) {
+            tmp = '.' + ('0' + Number(cpl[j]).toString(16)).slice(-2) + tmp;
+        }
+    }
+    r.mimeCodec = mime + tmp;
+    return r;
+};
+Box.boxes.hvcC.encodingLength = function(box) {
+    return box.buffer.length;
+};
+Box.boxes.hev1 = Box.boxes.VisualSampleEntry;
+Box.boxes.hvc1 = Box.boxes.VisualSampleEntry;
 
 Box.boxes.fullBoxes.sidx = true;
 Box.boxes.sidx = {};

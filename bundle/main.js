@@ -153,10 +153,6 @@ function VideoFile(data, streamer) {
     }
 
     window.addEventListener('online', this);
-
-    if (typeof window.setImmediate !== 'function') {
-        this.onIdle = window.onIdle;
-    }
 }
 
 VideoFile.prototype = Object.create(null);
@@ -166,10 +162,6 @@ Object.defineProperty(VideoFile.prototype, 'isOnline', {
         return navigator.onLine !== false;
     }
 });
-
-VideoFile.prototype.onIdle = function(callback) {
-    window.setImmediate(callback);
-};
 
 VideoFile.prototype.handleEvent = function(ev) {
     if (d) {
@@ -459,7 +451,7 @@ VideoFile.prototype.fetch = function fetch(startpos, recycle) {
             delete self.fetching[pos];
 
             var retry = function() {
-                self.onIdle(self.fetch.bind(self, startpos, recycle));
+                queueMicrotask(self.fetch.bind(self, startpos, recycle));
             };
 
             if (typeof ev === 'number') {
@@ -811,7 +803,7 @@ Streamer.prototype.handleEvent = function(ev) {
             this.stream.flushSourceBuffers();
 
             if (this.video.paused) {
-                onIdle(this.play.bind(this));
+                queueMicrotask(this.play.bind(this));
             }
         /* fallthrough, to clear the paused flag */
         case 'playing':
@@ -1057,7 +1049,7 @@ Streamer.prototype.getImage = function(w, h) {
 
     return new Promise(function _(resolve, reject) {
         if (!video.videoWidth) {
-            onIdle(function() {
+            queueMicrotask(function() {
                 reject(-9);
             });
             return;
@@ -1088,8 +1080,9 @@ Streamer.prototype.getImage = function(w, h) {
                 console.debug('[Streamer.getImage()] Got +70% of black pixels, retrying...');
             }
 
-            if (video.paused || video.ended) {
-                onIdle(function() {
+            if (video.paused || video.ended || window.safari) {
+                // nb: https://bugs.webkit.org/show_bug.cgi?id=206812
+                queueMicrotask(function() {
                     reject(-5);
                 });
             }

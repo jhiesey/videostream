@@ -157,6 +157,11 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
 
         chunk = buffer + chunk;
     }
+    else if (this.filename.indexOf('/buffer/index.js') > 0) {
+        // XXX: Browserify 17.0.0 started inserting a double-closure here, which may be correct but weird..
+        chunk = 'var Buffer = function Buffer(a,b,c) {' +
+            ' return typeof a == "number" ? allocUnsafe(a) : from(a,b,c) };\n' + chunk;
+    }
 
     // Replace the slow .slice(arguments) usage
     if (this.filename.indexOf('/pump/index.js') > 0) {
@@ -330,6 +335,9 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
     // Make the ebml schema smaller (saving ~40KB)
     if (this.filename.indexOf('/ebml/schema.js') > 0) {
         chunk = chunk.replace(/^\s+"(?:description|cppname)":\s*".*",?$/mg, '');
+        beautify = false;
+    }
+    else if (this.filename.indexOf('/bundle/locale.js') > 0) {
         beautify = false;
     }
 
