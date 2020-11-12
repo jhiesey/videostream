@@ -5,7 +5,7 @@ const MP4Remuxer = require('./mp4-remuxer')
 
 function VideoStream (file, mediaElem, opts = {}) {
   if (!(this instanceof VideoStream)) {
-    console.warn("don't invoked VideoStream without 'new'")
+    console.warn("Don't invoke VideoStream without the 'new' keyword.")
     return new VideoStream(file, mediaElem, opts)
   }
 
