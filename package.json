@@ -27,5 +27,19 @@
     "browserify": "^16.2.3",
     "http-server": "^0.11.1",
     "readable-stream": "^3.0.6"
-  }
+  },
+  "funding": [
+    {
+      "type": "github",
+      "url": "https://github.com/sponsors/feross"
+    },
+    {
+      "type": "patreon",
+      "url": "https://www.patreon.com/feross"
+    },
+    {
+      "type": "consulting",
+      "url": "https://feross.org/support"
+    }
+  ]
 }
