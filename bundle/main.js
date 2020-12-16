@@ -549,7 +549,6 @@ function Streamer(data, video, options) {
     this.video = video;
     this.timeupdate = 0;
     this.stalled = false;
-    this.activitimer = null;
     this.evs = Object.create(null);
     this.presentationOffset = 0;
     this.playbackTook = Date.now();
@@ -833,8 +832,9 @@ Streamer.prototype.handleEvent = function(ev) {
             }
         /* fallthrought */
         case 'canplay':
-            if (1 || ev.type === 'canplay') {
-                videoFile.canplay = true;
+            videoFile.canplay = true;
+            if (ev.type === 'canplay') {
+                delay.cancel('vs:pump-track');
             }
             if (this.options.autoplay && !videoFile.playing) {
                 this.play();
@@ -1006,10 +1006,7 @@ Streamer.prototype.notify = function(ev) {
 };
 
 Streamer.prototype._clearActivityTimer = function() {
-    if (this.activitimer) {
-        clearTimeout(this.activitimer);
-        this.activitimer = null;
-    }
+    delay.cancel('vs:activity-timer');
 };
 
 Streamer.prototype._setActivityTimer = function() {
@@ -1020,8 +1017,7 @@ Streamer.prototype._setActivityTimer = function() {
         return;
     }
 
-    this._clearActivityTimer();
-    this.activitimer = setTimeout(function() {
+    delay('vs:activity-timer', function() {
         var file = self.file;
         var video = self.video || false;
 

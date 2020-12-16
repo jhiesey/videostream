@@ -161,6 +161,14 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
         // XXX: Browserify 17.0.0 started inserting a double-closure here, which may be correct but weird..
         chunk = 'var Buffer = function Buffer(a,b,c) {' +
             ' return typeof a == "number" ? allocUnsafe(a) : from(a,b,c) };\n' + chunk;
+
+        // We do have copyWithin availability
+        chunk = chunk.replace("&& typeof Uint8Array.prototype.copyWithin === 'function'", '');
+
+        // @todo remove when upgrading
+        chunk = chunk.replace('this === target && start < targetStart', '0');
+        chunk = chunk.replace("typeof Symbol !== 'undefined'", '0');
+        chunk = chunk.replace(/(\S+)\.__proto__ = (\w\S+)/g, 'Object.setPrototypeOf($1, $2)');
     }
 
     // Replace the slow .slice(arguments) usage
@@ -230,6 +238,9 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
         // Replace process.nextTick calls not covered by the above
         re = q('process.nextTick(') + '([^,]+?)(,[^)]+?)?\\)';
         chunk = chunk.replace(new RegExp(re, 'g'), 'vsNT($1.bind(null$2))');
+
+        // Unsafe tiny speed up
+        chunk = chunk.replace('chunkInvalid(state, chunk)', '0');
 
         // We don't need util.inspect...
         if (this.filename.indexOf('/readable-stream/lib/internal/streams/buffer_list.js') > 0) {

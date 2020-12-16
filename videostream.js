@@ -4,7 +4,6 @@ var pump = require('pump');
 var MP4Remuxer = require('./mp4-remuxer');
 var EBMLRemuxer = require('./ebml-remuxer');
 var MediaElementWrapper = require('mediasource');
-var toArrayBuffer = require('to-arraybuffer');
 
 module.exports = VideoStream;
 
@@ -97,6 +96,7 @@ VideoStream.prototype._createMuxer = function() {
 
 VideoStream.prototype.createWriteStream = function(obj) {
     var videoStream = this;
+    var videoFile = videoStream._file;
     var mediaSource = videoStream._elemWrapper.createWriteStream(obj);
     var mediaSourceDestroy = mediaSource.destroy;
 
@@ -146,7 +146,7 @@ VideoStream.prototype.createWriteStream = function(obj) {
                         // sb.appendWindowEnd = end;
                     }
 
-                    sb.appendBuffer(toArrayBuffer(chunk));
+                    sb.appendBuffer(new Uint8Array(chunk).buffer);
                     this._cb = cb;
                     return;
                 }
@@ -200,6 +200,18 @@ VideoStream.prototype.createWriteStream = function(obj) {
         }
     };
 
+    mediaSource._flow = function() {
+        if (this.destroyed || !this._sourceBuffer || this._sourceBuffer.updating || videoFile.throttle) {
+            return;
+        }
+
+        if (this._cb) {
+            var cb = this._cb;
+            this._cb = null;
+            cb();
+        }
+    };
+
     mediaSource.on('error', function(err) {
         videoStream._elemWrapper.error(err)
     });
@@ -216,7 +228,12 @@ VideoStream.prototype._pump = function(time) {
         time = video.currentTime;
 
         if (this._type !== 'WebM' || !this.withinBufferedRange(time)) {
-            this._tryPump(time);
+            var self = this;
+            delay('vs:pump-track', tryCatch(function() {
+                self._tryPump(time);
+            }, function(ex) {
+                self._elemWrapper.error(ex);
+            }), 250);
         }
         else if (d) {
             console.debug('Ignoring pump within buffered range.', time);

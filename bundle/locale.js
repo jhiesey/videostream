@@ -220,7 +220,24 @@ ns.bcp47match = function(lang) {
     }
 
     lang = bcp47iso639[lang];
-    return lang === ns.lang && lang;
+    if (lang && lang === (localStorage.vslang || $.vslang)) {
+        // user-overridden lang
+        return lang;
+    }
+
+    var locales = [navigator.language, mega.intl.locale];
+    for (var i = locales.length; i--;) {
+        var locale = String(locales[i]).split('-');
+        if (locale[1] && String(locale[1]).toLowerCase() === lang) {
+            // lang as per user country
+            return lang;
+        }
+        if (lang && lang === locale[0]) {
+            // lang as per UI/browser locale
+            return lang;
+        }
+    }
+    return false;
 };
 
 module.exports = ns;

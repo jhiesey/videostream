@@ -332,7 +332,7 @@ MP4Remuxer.prototype._processMoov = function (moov) {
             currChunkEntry = stbl.stsc.entries[sampleToChunkIndex]
 
 			// Compute size
-			var size = stbl.stsz.entries[sample]
+			var size = stbl.stsz.sample_size || stbl.stsz.entries[sample];
 
 			// Compute time data
 			var duration = decodingTimeEntry.value && decodingTimeEntry.value.duration || 0;
@@ -356,7 +356,7 @@ MP4Remuxer.prototype._processMoov = function (moov) {
 
 			// Go to next sample
 			sample++
-			if (sample >= stbl.stsz.entries.length) {
+			if (sample >= stbl.stsz.sample_count) {
 				break
 			}
 
@@ -557,7 +557,7 @@ MP4Remuxer.prototype.seek = function (time) {
             console.warn('^ excessive highWaterMark detected...');
         }
     }
-    highWaterMark = (highWaterMark + 0x1000000) & -0x1000000;
+    highWaterMark = Math.min(((highWaterMark + 0x1000000) & -0x1000000) >>> 0, Math.pow(2,26) * self._tracks.length);
 
     return self._tracks.map(function(track, i) {
 		// find the keyframe before the time
@@ -976,4 +976,25 @@ Box.boxes.AudioSampleEntry.decode = function(buf, offset, end) {
     }
 
     return box
+};
+
+Box.boxes.stsz.decode = function(buf, offset) {
+    buf = buf.slice(offset)
+    var size = buf.readUInt32BE(0)
+    var num = buf.readUInt32BE(4)
+    var entries = []
+
+    if (size === 0) {
+        entries = new Array(num)
+
+        for (var i = 0; i < num; i++) {
+            entries[i] = buf.readUInt32BE(i * 4 + 8)
+        }
+    }
+
+    return {
+        sample_size: size,
+        sample_count: num,
+        entries: entries
+    }
 };
