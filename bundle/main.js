@@ -833,9 +833,6 @@ Streamer.prototype.handleEvent = function(ev) {
         /* fallthrought */
         case 'canplay':
             videoFile.canplay = true;
-            if (ev.type === 'canplay') {
-                delay.cancel('vs:pump-track');
-            }
             if (this.options.autoplay && !videoFile.playing) {
                 this.play();
             }

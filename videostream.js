@@ -201,8 +201,16 @@ VideoStream.prototype.createWriteStream = function(obj) {
     };
 
     mediaSource._flow = function() {
-        if (this.destroyed || !this._sourceBuffer || this._sourceBuffer.updating || videoFile.throttle) {
+        var sb = this._sourceBuffer;
+        if (this.destroyed || !sb || sb.updating) {
             return;
+        }
+
+        if (videoFile.throttle && sb.buffered.length) {
+            var t = sb.buffered.end(sb.buffered.length - 1) - this._elem.currentTime;
+            if (t > this._bufferDuration) {
+                return;
+            }
         }
 
         if (this._cb) {
@@ -228,12 +236,7 @@ VideoStream.prototype._pump = function(time) {
         time = video.currentTime;
 
         if (this._type !== 'WebM' || !this.withinBufferedRange(time)) {
-            var self = this;
-            delay('vs:pump-track', tryCatch(function() {
-                self._tryPump(time);
-            }, function(ex) {
-                self._elemWrapper.error(ex);
-            }), 250);
+            this._tryPump(time);
         }
         else if (d) {
             console.debug('Ignoring pump within buffered range.', time);
