@@ -472,7 +472,7 @@ VideoFile.prototype.fetch = function fetch(startpos, recycle) {
                 }
                 self.overquota = true;
                 self.retryq.push(retry);
-                self.streamer._setActivityTimer();
+                self.streamer._setActivityTimer(50);
             }
             else {
                 if (d) {
@@ -1006,10 +1006,10 @@ Streamer.prototype._clearActivityTimer = function() {
     delay.cancel('vs:activity-timer');
 };
 
-Streamer.prototype._setActivityTimer = function() {
+Streamer.prototype._setActivityTimer = function(force) {
     var self = this;
     var stream = self.stream;
-    if (stream instanceof AudioStream) {
+    if (!force && stream instanceof AudioStream) {
         // audio files cannot get into buffering...
         return;
     }
@@ -1033,7 +1033,7 @@ Streamer.prototype._setActivityTimer = function() {
             // We used to handle stalled events... http://crbug.com/836951
             self.handleEvent({type: 'stalled', fake: 1, target: video});
         }
-    }, 1600);
+    }, force || 1600);
 };
 
 Streamer.prototype.getImage = function(w, h) {

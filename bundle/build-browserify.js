@@ -125,6 +125,7 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
         chunk = babel.transformSync(chunk, babelOptions).code;
 
         chunk = chunk.replace(/function _inheritsLoose[^\n]+/, '');
+        chunk = chunk.replace(/function _setPrototypeOf[^\n]+/, '');
         chunk = chunk.replace(/_inheritsLoose/g, "require('inherits')");
     }
 

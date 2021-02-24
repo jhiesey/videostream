@@ -99,6 +99,19 @@ VideoStream.prototype.createWriteStream = function(obj) {
     var videoFile = videoStream._file;
     var mediaSource = videoStream._elemWrapper.createWriteStream(obj);
     var mediaSourceDestroy = mediaSource.destroy;
+    var trace = !localStorage.vsd ? null : function(time, sb, chunk) {
+        var start = time;
+        var end = time + chunk.duration;
+
+        var b = [];
+        for (var i = 0; i < sb.buffered.length; ++i) {
+            b.push(sb.buffered.start(i) + '-' + sb.buffered.end(i));
+        }
+        console.debug('ranges(%s), timecode=%s, duration=%s, time=%s, start=%s(%s), end=%s(%s)',
+            b.join(', '), chunk.timecode, chunk.duration, time,
+            start, sb.appendWindowStart, end, sb.appendWindowEnd,
+            sb.timestampOffset, chunk.seektime);
+    };
 
     mediaSource._write = function(chunk, encoding, cb) {
         if (!this.destroyed) {
@@ -121,19 +134,9 @@ VideoStream.prototype.createWriteStream = function(obj) {
 
                     if (chunk.duration) {
                         var time = sb.buffered.length ? sb.buffered.end(0) : 0;
-                        /**
-                        var start = time;
-                        var end = time + chunk.duration;
-
-                        if (d) {
-                            var b = [];
-                            for (var i = 0; i < sb.buffered.length; ++i) {
-                                b.push(sb.buffered.start(i) + '-' + sb.buffered.end(i));
-                            }
-                            console.debug('ranges(%s), timecode=%s, duration=%s, time=%s, start=%s(%s), end=%s(%s)',
-                                b.join(', '), chunk.timecode, chunk.duration, time,
-                                start, sb.appendWindowStart, end, sb.appendWindowEnd,
-                                sb.timestampOffset, chunk.seektime);
+                        /**/
+                        if (trace) {
+                            trace(time, sb, chunk);
                         }
                         /**/
 
@@ -201,22 +204,22 @@ VideoStream.prototype.createWriteStream = function(obj) {
     };
 
     mediaSource._flow = function() {
-        var sb = this._sourceBuffer;
-        if (this.destroyed || !sb || sb.updating) {
-            return;
-        }
+        if (this._cb && !this.destroyed) {
+            var sb = this._sourceBuffer;
 
-        if (videoFile.throttle && sb.buffered.length) {
-            var t = sb.buffered.end(sb.buffered.length - 1) - this._elem.currentTime;
-            if (t > this._bufferDuration) {
-                return;
+            if (sb && !sb.updating) {
+
+                if (videoFile.throttle && this._mediaSource.readyState === 'open' && sb.buffered.length) {
+                    var t = sb.buffered.end(sb.buffered.length - 1) - this._elem.currentTime;
+                    if (t > this._bufferDuration) {
+                        return;
+                    }
+                }
+
+                var cb = this._cb;
+                this._cb = null;
+                cb();
             }
-        }
-
-        if (this._cb) {
-            var cb = this._cb;
-            this._cb = null;
-            cb();
         }
     };
 

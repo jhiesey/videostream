@@ -8,7 +8,12 @@ var EBMLDecoder = require('ebml/lib/ebml/decoder');
 
 module.exports = EBMLRemuxer;
 
-if (d > 99) {
+var DEBUG = localStorage.vsd | 0;
+var DEBUG_INFO = DEBUG || window.d;
+var DEBUG_TRACE = DEBUG > 2;
+var DEBUG_VERBOSE = DEBUG > 1;
+
+if (DEBUG_TRACE) {
     var tmp = function EBMLDecoder() {
         this.$etup();
     };
@@ -46,7 +51,7 @@ createStream(EBMLRemuxer, EventEmitter);
 EBMLRemuxer.prototype.emitInitSegment = function(segment) {
     var tracks = segment.Tracks;
 
-    if (d) {
+    if (DEBUG_INFO) {
         console.log('initSegment', segment, [this]);
     }
 
@@ -78,7 +83,7 @@ EBMLRemuxer.prototype.emitInitSegment = function(segment) {
         var type = track.TrackType;
         var mime = getMime(codec, type);
 
-        if (d) {
+        if (DEBUG_INFO) {
             console.debug('Track%s, %s, %s', track.TrackNumber, codec, mime, track);
         }
 
@@ -94,7 +99,7 @@ EBMLRemuxer.prototype.emitInitSegment = function(segment) {
                 this._hasAudio = codec;
             }
             else {
-                if (d) {
+                if (DEBUG_INFO) {
                     console.debug('Unsupported audio track.', mime);
                 }
                 continue;
@@ -340,10 +345,15 @@ EBMLReader.prototype._onFinish = function() {
     this.destroy();
 };
 
+lazy(EBMLReader.prototype, '_clearDefaultDuration', function() {
+    // XXX: Apparently, recent Chrome versions (85+) does not need the default duration cleaned, tho
+    return !localStorage.vsncdd && window.chrome !== undefined || localStorage.vscdd;
+});
+
 EBMLReader.prototype._onData = function(state, data) {
     var tmp;
 
-    if (d > 2 && data.name !== 'SimpleBlock') {
+    if (DEBUG_VERBOSE && data.name !== 'SimpleBlock') {
         if (state === 'start') {
             this._conGroup++;
             console.group(data.name);
@@ -378,9 +388,10 @@ EBMLReader.prototype._onData = function(state, data) {
                 segment.offset = this._segmentOffset;
                 segment.data = this._read(this._ebmlOffset, data.start);
 
+                /**/
                 var dd = this._trackDefaultDuration;
-                if (dd) {
-                    if (d) {
+                if (dd && this._clearDefaultDuration) {
+                    if (DEBUG_INFO) {
                         console.debug('Cleaning DefaultDuration...\n' + hexdump(segment.data, dd.start).slice(0, 4).join('\n'));
                     }
 
@@ -396,6 +407,7 @@ EBMLReader.prototype._onData = function(state, data) {
                         }
                     }
                 }
+                /**/
 
                 this.emit('segment', segment);
                 return;
@@ -535,7 +547,7 @@ function MediaSegment(muxer, offset) {
                     self.append.apply(self, arguments);
                 }
                 else {
-                    if (d > 1) {
+                    if (DEBUG_INFO) {
                         console.debug(self + ' EOS', cluster === null);
                     }
                     self.push(null);
@@ -565,7 +577,7 @@ MediaSegment.prototype.append = function(cluster, timecode, duration) {
     if (duration < 0) {
         duration = this.playtime / this.timescale - timecode;
 
-        if (d) {
+        if (DEBUG_INFO) {
             console.debug(this + ' Last cluster, duration:', duration);
         }
     }
@@ -579,7 +591,7 @@ MediaSegment.prototype.append = function(cluster, timecode, duration) {
     else if ((cs >> 24) === 0xFF) {
         timecodeOffset = 5;
     }
-    else if (d) {
+    else if (DEBUG_INFO) {
         console.warn('Unexpected cluster data size...');
         this.hexdump(cluster);
     }
@@ -587,14 +599,14 @@ MediaSegment.prototype.append = function(cluster, timecode, duration) {
     if (timecodeOffset > 0) {
         cs = cluster.readUInt16BE(timecodeOffset);
         if ((cs >> 8) === 0xBF) {
-            if (d) {
+            if (DEBUG_INFO) {
                 console.debug(this + ' mkv timecode fixup (0x%s)', cluster.toString('hex', 0, timecodeOffset+9));
             }
             cs = cluster.readUInt16BE(timecodeOffset += 6);
         }
         if ((cs >> 8) === 0xE7 && (cs & 0xff) > 0x7F) {
-            // cluster.timecode = timecode * this.timescale;
-            cluster.duration = 1;//duration * this.timescale;
+            cluster.timecode = timecode * this.timescale;
+            cluster.duration = duration * this.timescale;
 
             if (this.seektime !== -1) {
                 cluster.seektime = this.seektime;
@@ -608,7 +620,7 @@ MediaSegment.prototype.append = function(cluster, timecode, duration) {
                 cluster.writeUInt8(0, offset++);
             }
         }
-        else if (d) {
+        else if (DEBUG_INFO) {
             console.warn('Unexpected timecode offset...');
         }
     }
@@ -627,7 +639,7 @@ function createStream(dest, source, destroy) {
         self.destroyed = false;
         source.call(self);
 
-        if (d > 2) {
+        if (DEBUG_VERBOSE) {
             var _emit = this.emit;
             this.emit = function(event) {
                 console.warn(this + '.emit(%s)', event, arguments, [this]);
@@ -638,7 +650,7 @@ function createStream(dest, source, destroy) {
 
     dest.prototype._async = function(cb) {
         var self = this;
-        onIdle(function() {
+        queueMicrotask(function() {
             if (!self.destroyed) {
                 cb.call(self);
             }
@@ -647,7 +659,7 @@ function createStream(dest, source, destroy) {
 
     destroy = destroy && tryCatch(destroy);
     dest.prototype.destroy = function(err) {
-        if (d) {
+        if (DEBUG_INFO) {
             var fn = err ? 'error' : 'debug';
             console[fn](this + '.destroy', this.destroyed, [this], err);
         }
