@@ -223,6 +223,9 @@ MP4Remuxer.prototype._processTracks = function(traks) {
             else if (stsd.type === 'fLaC') {
                 codec = 'flac';
             }
+            else if (stsd.type === '.mp3') {
+                codec = 'mp3';
+            }
 
             mime = 'audio/mp4; codecs="' + codec + '"';
             if (d) {
