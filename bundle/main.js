@@ -952,6 +952,7 @@ Streamer.prototype.play = function() {
     }
 
     if (videoFile) {
+        videoFile.throttle = 0;
         this._setActivityTimer();
     }
 };

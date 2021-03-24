@@ -144,6 +144,7 @@ MP4Remuxer.prototype._processTracks = function(traks) {
     var hevc = Object.assign(Object.create(null), {'hvc1': 1, 'hev1': 1});
     var vide = Object.assign(Object.create(null), {'avc1': 1, 'av01': 1}, hevc);
     var mp3a = Object.assign(Object.create(null), {'mp4a.6b': 1, 'mp4a.69': 1});
+    var swap = Object.assign(Object.create(null), {'fLaC': 'flac', '.mp3': 'mp3'});
 
     var validateAudioTrack = function(trk) {
         if (!trk) {
@@ -220,14 +221,8 @@ MP4Remuxer.prototype._processTracks = function(traks) {
                     codec = 'mp3'
                 }
             }
-            else if (stsd.type === 'fLaC') {
-                codec = 'flac';
-            }
-            else if (stsd.type === '.mp3') {
-                codec = 'mp3';
-            }
 
-            mime = 'audio/mp4; codecs="' + codec + '"';
+            mime = 'audio/mp4; codecs="' + (swap[codec] || codec) + '"';
             if (d) {
                 console.debug('Track%d: %s %s', i, locale.decodeMP4LangCode(lang), mime);
             }
