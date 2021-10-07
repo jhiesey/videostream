@@ -1,5 +1,4 @@
 var inherits = require('inherits');
-var toArrayBuffer = require('to-arraybuffer');
 var EventEmitter = require('events').EventEmitter;
 var Buffer = require('buffer').Buffer;
 
@@ -21,10 +20,15 @@ function AudioStream(file, mediaElem, opts) {
         self.destroy(ex);
     };
 
+    self._file = file;
+    self._decTick = 0;
     self._buffer = null;
+    self._bytesRead = 0;
     self._playOffset = 0;
     self._pauseOffset = 0;
     self._hasAudio = true;
+    self._decoding = false;
+    self._complete = false;
     self._elem = mediaElem;
     self._visualiser = null;
     self._audioSource = null;
@@ -40,20 +44,46 @@ function AudioStream(file, mediaElem, opts) {
     var fileStream = file.createReadStream({start: 0});
     self._fileStream = fileStream;
 
-    fileStream.on('data', function(data) {
-        var buffer = self._buffer;
-        self._buffer = buffer ? Buffer.concat([buffer, data]) : data;
-    });
+    fileStream.on('data', tryCatch(function(data) {
+        if (self._bytesRead > 0) {
+            self._buffer.set(data, self._bytesRead);
+            self._bytesRead += data.byteLength;
+        }
+        else if (self._buffer) {
+            var tmp = new Uint8Array(data.byteLength + self._buffer.byteLength);
+            tmp.set(self._buffer);
+            tmp.set(data, self._buffer.byteLength);
+            self._buffer = tmp;
+        }
+        else if (file.filesize > 0) {
+            self._buffer = new Uint8Array(file.filesize);
+            self._buffer.set(data, self._bytesRead);
+            self._bytesRead += data.byteLength;
+        }
+        else {
+            self._buffer = data;
+        }
+
+        if (opts.partial) {
+            self._feed(opts);
+
+            var read = self._bytesRead || self._buffer.byteLength;
+            var size = Math.min(file.fetchChunkSize << 1, AudioStream.maxChunkSize);
+
+            if (read > size) {
+                file.fetchChunkSize = size;
+                file.readerChunkSize = size;
+            }
+        }
+    }, destroy));
 
     fileStream.on('end', tryCatch(function() {
         fileStream.destroy();
         fileStream._file.reset();
 
-        var buffer = toArrayBuffer(self._buffer);
-        self._buffer = null;
+        self._complete = true;
+        self._feed(opts);
 
-        self.emit('audio-buffer', buffer);
-        context.decodeAudioData(buffer).then(self._setup.bind(self, opts.autoplay, opts.startTime)).catch(destroy);
     }, destroy));
 
     self._onError = function(err) {
@@ -87,6 +117,15 @@ function AudioStream(file, mediaElem, opts) {
 }
 
 inherits(AudioStream, EventEmitter);
+
+Object.defineProperty(AudioStream, 'maxChunkSize', {value: 4194304});
+Object.defineProperty(AudioStream, 'partialChunkSize', {value: 262144});
+
+Object.defineProperty(AudioStream.prototype, 'ready', {
+    get: function() {
+        return this._complete && !this._decoding;
+    }
+});
 
 AudioStream.prototype.destroy = function(err) {
     var self = this;
@@ -130,9 +169,108 @@ AudioStream.prototype.destroy = function(err) {
     }
 };
 
+AudioStream.prototype._decode = function(opts) {
+    var self = this;
+
+    if (self._buffer && !self._decoding) {
+        var len, data = self._buffer, done = !!self._complete;
+
+        if (done) {
+            data = data.buffer;
+            self.emit('audio-buffer', data);
+            self._buffer = null;
+        }
+        else {
+            var bufTime = this._bufTime;
+            if (bufTime > 20) {
+                self._decoding = true;
+                // log('bufTime', bufTime);
+                delay('vs.decode-audio-holder', function() {
+                    self._decoding = false;
+                    self._decode(opts);
+                }, 2e3);
+                return;
+            }
+            data = data.buffer.slice(0, self._bytesRead || undefined);
+        }
+        len = data.byteLength;
+
+        if (d > 1) {
+            log('Decoding new chunk...', done, len);
+        }
+
+        self._decoding = true;
+        self._audioContext.decodeAudioData(data)
+            .then(function(buffer) {
+                if (done || !opts.startTime || buffer.duration > opts.startTime) {
+                    self._setup(opts.autoplay, opts.startTime, buffer);
+                }
+            })
+            .catch(function(ex) {
+                if (d && done || d > 1) {
+                    log(ex);
+                }
+                if (done) {
+                    self.destroy(ex);
+                }
+                self._decTick = 1e11;
+            })
+            .finally(function() {
+                self._decoding = false;
+                var again = !done && self._complete;
+                if (!again && self._buffer) {
+                    var c = self._buffer;
+                    var b = self._bytesRead;
+                    var r = b > 0 ? Math.min(b, c.byteLength) : c.byteLength;
+                    again = r !== len;
+                }
+                if (again) {
+                    self._decode(opts);
+                }
+            });
+    }
+};
+
+AudioStream.prototype._feed = function(opts) {
+    var self = this;
+
+    if (!self._decoding) {
+        return self._decode(opts);
+    }
+
+    delay('vs.decode-audio-data', function() {
+        self._decTick = 0;
+        self._decode(opts);
+    }, self._complete || ++self._decTick > 31 ? 90 : 4e3);
+};
+
 AudioStream.prototype._setup = function(autoplay, time, buffer) {
     var self = this;
     var elm = self._elem;
+
+    if (self.destroyed) {
+        log('This instance has been destroyed.', [this]);
+        return;
+    }
+
+    Object.defineProperty(elm, 'duration', {
+        writable: true,
+        enumerable: true,
+        configurable: true,
+        value: buffer.duration
+    });
+
+    if (self._audioBuffer) {
+        time = self.currentTime;
+        if (d > 1) {
+            log('new chunk arrived...', [buffer], buffer.duration, time);
+        }
+        self._audioBuffer = buffer;
+        self._play(time);
+        self.emit('duration', buffer.duration);
+        return;
+    }
+
     var audioContext = self._audioContext;
     var audioStream = audioContext.createMediaStreamDestination();
     var videoCanvas = document.createElement('canvas');
@@ -141,7 +279,9 @@ AudioStream.prototype._setup = function(autoplay, time, buffer) {
     var tracks = [audioStream.stream.getTracks()[0], videoStream.getTracks()[0]];
     var audioAnalyser = audioContext.createAnalyser();
 
-    // log('setup', buffer, autoplay, tracks);
+    if (d > 1) {
+        log('setup', buffer, autoplay, tracks);
+    }
 
     self._visualiser = new Visualiser(self);
     self._audioAnalyser = audioAnalyser;
@@ -164,13 +304,6 @@ AudioStream.prototype._setup = function(autoplay, time, buffer) {
 
     elm.srcObject = new MediaStream(tracks);
     // elm.srcObject = self._audioStream.stream;
-
-    Object.defineProperty(elm, 'duration', {
-        writable: true,
-        enumerable: true,
-        configurable: true,
-        value: buffer.duration
-    });
 };
 
 AudioStream.prototype._stop = function() {
@@ -222,6 +355,11 @@ AudioStream.prototype._play = function(time) {
     if (visualiser) {
         visualiser._start();
     }
+
+    var f = self._file;
+    f.paused = false;
+    f.playing = true;
+    self.emit('activity');
 };
 
 AudioStream.prototype._captureStream = function(canvas) {
@@ -252,6 +390,13 @@ AudioStream.prototype._captureStream = function(canvas) {
     return stream;
 };
 
+Object.defineProperty(AudioStream.prototype, '_bufTime', {
+    get: function() {
+        var ab = this._audioBuffer || false;
+        return ab.duration - this.currentTime;
+    }
+});
+
 Object.defineProperty(AudioStream.prototype, 'currentTime', {
     get: function() {
         var self = this;
@@ -270,7 +415,16 @@ Object.defineProperty(AudioStream.prototype, 'currentTime', {
         // log('currentTime', result, context.currentTime, self._playOffset);
 
         if (result >= audioBuffer.duration) {
-            self._elem.pause();
+            if (self.ready) {
+                self._elem.pause();
+            }
+            else {
+                self._onPause();
+                self.emit('inactivity');
+                var f = self._file;
+                f.paused = true;
+                f.playing = false;
+            }
         }
 
         return result;

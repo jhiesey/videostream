@@ -13,12 +13,13 @@ var FIND_MOOV_SEEK_SIZE = 4096;
 
 module.exports = MP4Remuxer
 
-function MP4Remuxer (file) {
+function MP4Remuxer (file, opts) {
 	var self = this
 	EventEmitter.call(self)
 	self._tracks = []
 	self._file = file
 	self._decoder = null
+	self._videoOnly = opts && opts.videoOnly;
 	self._findMoov(0)
 }
 
@@ -142,9 +143,9 @@ MP4Remuxer.prototype._processTracks = function(traks) {
     var self = this;
     var mime, codec, audio = [];
     var hevc = Object.assign(Object.create(null), {'hvc1': 1, 'hev1': 1});
-    var vide = Object.assign(Object.create(null), {'avc1': 1, 'av01': 1}, hevc);
     var mp3a = Object.assign(Object.create(null), {'mp4a.6b': 1, 'mp4a.69': 1});
-    var swap = Object.assign(Object.create(null), {'fLaC': 'flac', '.mp3': 'mp3'});
+    var vide = Object.assign(Object.create(null), {'avc1': 1, 'av01': 1, 'vp09': 1}, hevc);
+    var swap = Object.assign(Object.create(null), {'fLaC': 'flac', 'Opus': 'opus', '.mp3': 'mp3'});
 
     var validateAudioTrack = function(trk) {
         if (!trk) {
@@ -193,6 +194,9 @@ MP4Remuxer.prototype._processTracks = function(traks) {
             else if (stsd.av1C) {
                 codec = stsd.av1C.mimeCodec || codec;
             }
+            else if (stsd.vpcC) {
+                codec = stsd.vpcC.mimeCodec || codec;
+            }
             else if (stsd.hvcC) {
                 codec += stsd.hvcC.mimeCodec;
             }
@@ -206,7 +210,7 @@ MP4Remuxer.prototype._processTracks = function(traks) {
                 self._hasVideo = {type: stsd.type, codec: codec, mime: mime, trak: trak, lang: lang, idx: i};
             }
         }
-        else if (type === 'soun') {
+        else if (type === 'soun' && !self._videoOnly) {
             codec = stsd.type;
 
             if (stsd.type === 'mp4a') {
@@ -796,6 +800,67 @@ Box.boxes.av1C.encodingLength = function (box) {
     return box.buffer.length;
 };
 Box.boxes.av01 = Box.boxes.VisualSampleEntry;
+
+Box.boxes.vpcC = {};
+Box.boxes.vpcC.encode = function _(box, buf, offset) {
+    buf = buf ? buf.slice(offset) : Buffer.allocUnsafe(box.buffer.length);
+    box.buffer.copy(buf);
+    _.bytes = box.buffer.length;
+};
+Box.boxes.vpcC.decode = function(buf, offset, end) {
+    // https://www.webmproject.org/vp9/mp4/
+    var p = 0;
+    var r = Object.create(null);
+    var readUint8 = function() {
+        return buf.readUInt8(p++);
+    };
+    var readUint8Array = function(len) {
+        var out = new Uint8Array(len);
+        for (var i = 0; i < len; i++) {
+            out[i] = readUint8();
+        }
+        return out;
+    };
+    var readUint16 = function() {
+        var v = buf.readUInt16BE(p);
+        p += 2;
+        return v;
+    };
+    buf = buf.slice(offset, end);
+
+    var tmp = readUint8();
+    this.version = tmp & 0x7F;
+
+    if (this.version !== 1) {
+        console.warn('Unsupported/deprecated vpcC version %d.', this.version);
+    }
+    else {
+        p += 3; // XXX: out of spec, find it out..
+        r.profile = readUint8();
+        r.level = readUint8();
+        tmp = readUint8();
+        r.bitDepth = tmp >> 4;
+        r.chromaSubsampling = (tmp >> 1) & 7;
+        r.videoFullRangeFlag = tmp & 1;
+        // r.colourPrimaries = readUint8();
+        // r.transferCharacteristics = readUint8();
+        // r.matrixCoefficients = readUint8();
+        // r.codecIntializationDataSize = readUint16();
+        // r.codecIntializationData = readUint8Array(r.codecIntializationDataSize);
+        r.buffer = Buffer.from(buf);
+        r.mimeCodec = [
+            'vp09',
+            ('0' + r.profile).slice(-2),
+            ('0' + r.level).slice(-2),
+            ('0' + r.bitDepth).slice(-2)
+        ].join('.');
+    }
+    return r;
+};
+Box.boxes.vpcC.encodingLength = function(box) {
+    return box.buffer.length;
+};
+Box.boxes.vp09 = Box.boxes.VisualSampleEntry;
 
 Box.boxes.hvcC = {};
 Box.boxes.hvcC.encode = function _(box, buf, offset) {

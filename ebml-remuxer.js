@@ -79,7 +79,7 @@ EBMLRemuxer.prototype.emitInitSegment = function(segment) {
 
     for (var i = tracks.length; i--;) {
         var track = tracks[i];
-        var codec = track.CodecID;
+        var codec = String(track.CodecID).replace(/\W/g, '');
         var type = track.TrackType;
         var mime = getMime(codec, type);
 
@@ -591,7 +591,7 @@ MediaSegment.prototype.append = function(cluster, timecode, duration) {
     else if ((cs >> 24) === 0xFF) {
         timecodeOffset = 5;
     }
-    else if (DEBUG_INFO) {
+    else if (DEBUG_TRACE) {
         console.warn('Unexpected cluster data size...');
         this.hexdump(cluster);
     }

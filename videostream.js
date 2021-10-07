@@ -20,15 +20,26 @@ function VideoStream(file, mediaElem, opts) {
     self._elemWrapper = new MediaElementWrapper(mediaElem, opts);
     self._waitingFired = false;
     self._seekCoercion = false;
+    self._sbQuotaError = null;
     self._trackMeta = null;
     self._file = file;
     self._tracks = null;
     self._type = opts.type;
+    self._fpTick = 0;
     self._startTime = opts.startTime;
     if (self._elem.preload !== 'none') {
-        self._createMuxer()
+        self._createMuxer(opts)
     }
-    self.flushSourceBuffers = opts.sbflush ? self._flushSourceBuffers : function() { /* noop */
+    self.flushSourceBuffers = opts.sbflush ? self._flushSourceBuffers : function() {
+        if (self._sbQuotaError) {
+            var s = file.streamer;
+            if (s && s.state === 'stalled') {
+                if (d) {
+                    console.warn('Forcing pump on quota-error while stalled...');
+                }
+                self._enqueueForcePump(Math.max(0.3, self._elem.currentTime - 1.2));
+            }
+        }
     };
 
     self._onError = function(err) {
@@ -41,7 +52,7 @@ function VideoStream(file, mediaElem, opts) {
     self._onWaiting = function() {
         self._waitingFired = true;
         if (!self._muxer) {
-            self._createMuxer()
+            self._createMuxer(opts)
         }
         else if (self._tracks) {
             /*if (d && self._type === 'WebM' && self._elem.currentTime) {
@@ -61,10 +72,10 @@ function VideoStream(file, mediaElem, opts) {
 
 VideoStream.prototype = Object.create(null);
 
-VideoStream.prototype._createMuxer = function() {
+VideoStream.prototype._createMuxer = function(opts) {
     var self = this;
     var ebml = {'WebM': 1, 'Matroska': 1};
-    self._muxer = ebml[self._type] ? new EBMLRemuxer(self._file) : new MP4Remuxer(self._file);
+    self._muxer = ebml[self._type] ? new EBMLRemuxer(self._file, opts) : new MP4Remuxer(self._file, opts);
     self._muxer.once('ready', function(data) {
         self._tracks = data.map(function(trackData) {
             var mediaSource = self.createWriteStream(trackData.mime);
@@ -149,6 +160,7 @@ VideoStream.prototype.createWriteStream = function(obj) {
                         // sb.appendWindowEnd = end;
                     }
 
+                    // trace(0, sb, chunk);
                     sb.appendBuffer(new Uint8Array(chunk).buffer);
                     this._cb = cb;
                     return;
@@ -158,6 +170,7 @@ VideoStream.prototype.createWriteStream = function(obj) {
                         console.debug('Caught %s', ex.name, ex);
                     }
                     if (ex.name === 'QuotaExceededError') {
+                        videoStream._sbQuotaError = true;
                         videoStream.flushSourceBuffers(-1);
                     }
                     else {
@@ -224,7 +237,10 @@ VideoStream.prototype.createWriteStream = function(obj) {
     };
 
     mediaSource.on('error', function(err) {
-        videoStream._elemWrapper.error(err)
+        var elm = videoStream._elemWrapper;
+        if (elm) {
+            elm.error(err);
+        }
     });
 
     return mediaSource;
@@ -238,7 +254,7 @@ VideoStream.prototype._pump = function(time) {
         }
         time = video.currentTime;
 
-        if (this._type !== 'WebM' || !this.withinBufferedRange(time)) {
+        if (this._type !== 'WebM' || !this.withinBufferedRange(time + 1)) {
             this._tryPump(time);
         }
         else if (d) {
@@ -367,6 +383,8 @@ VideoStream.prototype.destroy = function() {
 
     self._elem.removeAttribute('src');
     self._elem = false;
+    self._file = false;
+    self._elemWrapper = false;
 };
 
 VideoStream.prototype.forEachSourceBuffer = function(cb) {
@@ -390,7 +408,68 @@ VideoStream.prototype.forEachSourceBuffer = function(cb) {
     }
 };
 
-VideoStream.prototype.removeBuffered = function(sb, currentTime) {
+VideoStream.prototype.onSourceBufferUpdateEnded = function(sb, cb) {
+    if (!sb.updating) {
+        return queueMicrotask(cb);
+    }
+    sb.addEventListener("updateend", function end() {
+        sb.removeEventListener("updateend", end);
+        queueMicrotask(cb);
+    });
+};
+
+VideoStream.prototype._enqueueForcePump = function(offset) {
+    if (++this._fpTick > 3) {
+        return this._forcePump(offset);
+    }
+    delay('vs.force-track-pump', this._forcePump.bind(this, offset), 2600)
+};
+
+VideoStream.prototype._forcePump = function(offset) {
+    var self = this;
+    var res = 0, step = 0;
+    var pump = function() {
+        var f = self._file;
+        if (!--step && f) {
+            if (d) {
+                self.forEachBufferedRanges(dump)
+            }
+            if (f.playing) {
+                f.throttle = 0;
+                self._pump(offset);
+            }
+        }
+    };
+
+    self._fpTick = 0;
+    delay.cancel('vs.force-track-pump');
+
+    if (this._tracks) {
+        var t = this._tracks;
+        for (var i = t.length; i--;) {
+            var ms = t[i].mediaSource;
+            var sb = ms._sourceBuffer;
+
+            ++step;
+            ms._cb = null;
+            ms.destroy();
+
+            if (sb.updating) {
+                res = -1;
+                this.onSourceBufferUpdateEnded(sb, this.removeBuffered.bind(this, sb, null, pump));
+            }
+            else {
+                res |= this.removeBuffered(sb, null, pump);
+            }
+        }
+    }
+    if (!step) {
+        pump(++step);
+    }
+    return res;
+};
+
+VideoStream.prototype.removeBuffered = function(sb, currentTime, callback) {
     if (sb.buffered.length) {
         var startRange = sb.buffered.start(0);
         var endRange = sb.buffered.end(sb.buffered.length - 1);
@@ -403,10 +482,16 @@ VideoStream.prototype.removeBuffered = function(sb, currentTime) {
             startRange = currentTime;
         }
 
-        sb.remove(startRange, endRange);
+        tryCatch(sb.remove.bind(sb, startRange, endRange), d > 2 ? dump : false)();
+        if (callback) {
+            this.onSourceBufferUpdateEnded(sb, callback);
+        }
         return true;
     }
 
+    if (callback) {
+        queueMicrotask(callback);
+    }
     return false;
 };
 
@@ -427,10 +512,10 @@ VideoStream.prototype.getBufferedRange = function(sb) {
 };
 
 VideoStream.prototype.findTimeGAPs = function() {
-    var gap = {};
+    var gap = {}, res = 0;
     this.forEachBufferedRanges(function(sb, sr, er, ct, ms, tid, bid) {
         if (bid && !gap[tid]) {
-            gap[tid] = 1;
+            gap[tid] = res = 1;
             console.warn('SourceBuffer has a gap!', [sb], [ms]);
         }
 
@@ -438,6 +523,7 @@ VideoStream.prototype.findTimeGAPs = function() {
             console.debug('buffer gap on track%s(%s), sr=%s, er=%s, ct=%s', tid, bid, sr, er, ct);
         }
     });
+    return res;
 };
 
 VideoStream.prototype.forEachBufferedRanges = function(cb) {
@@ -464,7 +550,8 @@ VideoStream.prototype.forEachBufferedRanges = function(cb) {
 };
 
 // Flush source buffers when seeking backward or forward
-VideoStream.prototype._flushSourceBuffers = function(mode) {
+VideoStream.prototype._flushSourceBuffers = function(mode, track) {
+    var res = false;
     this.forEachSourceBuffer(function(sb, startRange, endRange, currentTime, mediaSource) {
         if (d) {
             console.debug('[VideoStream.flushSourceBuffers] ct=%s sr=%s er=%s',
@@ -483,7 +570,7 @@ VideoStream.prototype._flushSourceBuffers = function(mode) {
             }
             else {
                 if (endRange >= currentTime) {
-                    endRange = Math.floor(currentTime);
+                    endRange = currentTime;
                 }
                 if (startRange >= currentTime) {
                     return;
@@ -492,6 +579,10 @@ VideoStream.prototype._flushSourceBuffers = function(mode) {
 
             if (endRange > startRange && (endRange - startRange) > 1) {
                 sb.remove(startRange, endRange);
+                if (track) {
+                    this.onSourceBufferUpdateEnded(track);
+                }
+                ++res;
 
                 if (d) {
                     console.log('[VideoStream.flushSourceBuffers] remove took place', startRange, endRange);
@@ -499,6 +590,7 @@ VideoStream.prototype._flushSourceBuffers = function(mode) {
             }
         }
     });
+    return res;
 };
 
 // Returns the number of buffered seconds

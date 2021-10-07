@@ -48,18 +48,18 @@ function CacheStream(pos, file) {
 inherits(CacheStream, Readable);
 
 CacheStream.prototype._read = function(size) {
-    size = window.chrome ? 1048576 : 262144;
-
     if (!this._file || !this._file._vs) {
         // streamer destroyed
         return
     }
+    size = this._file.readerChunkSize;
 
     var videoFile = this._file;
     var videoStream = videoFile._vs;
     var fileSize = videoFile.filesize;
     var currentTime = videoStream._elem.currentTime;
-    var bufTime = currentTime && !videoFile.seeking && videoStream.bufTime;
+    var seeking = videoFile.seeking || videoFile.streamer.playbackSeeking;
+    var bufTime = currentTime && !seeking && videoStream.bufTime;
 
     if (bufTime > MAX_BUF_SECONDS) {
         videoFile.throttle = currentTime + bufTime;
@@ -134,6 +134,9 @@ function VideoFile(data, streamer) {
     this.curfetch = 0;
     this.filesize = -1;
 
+    this.fetchChunkSize = REQUEST_SIZE;
+    this.readerChunkSize = window.chrome ? (REQUEST_SIZE >> 2) : 262144;
+
     this.throttle = 0;
     this.backoff = 200;
     this.paused = true;
@@ -147,8 +150,10 @@ function VideoFile(data, streamer) {
     this.maxCache = MAX_CACHE;
 
     if (data instanceof Blob) {
-        this.minCache = 64 * 1048576;
-        this.maxCache = 80 * 1048576;
+        if (!(d > 1)) {
+            this.minCache = 64 * 1048576;
+            this.maxCache = 80 * 1048576;
+        }
         this.fetcher = this.fileReader;
     }
 
@@ -287,16 +292,9 @@ VideoFile.prototype.cacheadd = function cacheadd(pos, data) {
 
 VideoFile.prototype.fetcher = function(data, byteOffset, byteLength) {
     if (SIMULATE_RESUME_FROM_STALLED && byteOffset > (REQUEST_SIZE * 8)) {
-        return MegaPromise.reject({target: {status: 509}}, data);
+        return Promise.reject({target: {status: 509}}, data);
     }
-    return new MegaPromise(function(resolve, reject) {
-        M.gfsfetch(data, byteOffset, byteLength).fail(reject).done(function(data) {
-            var buffer = data.buffer;
-            delete data.buffer;
-
-            resolve([data, buffer]);
-        });
-    });
+    return M.gfsfetch(data, byteOffset, byteLength);
 };
 
 VideoFile.prototype.fileReader = function(data, byteOffset, byteLength) {
@@ -307,7 +305,9 @@ VideoFile.prototype.fileReader = function(data, byteOffset, byteLength) {
         var blob = data.slice(byteOffset, byteLength);
         var reader = new FileReader();
         reader.onload = function() {
-            resolve({buffer: reader.result, s: data.size});
+            var chunk = new Uint8Array(this.result);
+            chunk.payload = {s: data.size};
+            resolve(chunk);
         };
         reader.onerror = reject;
         reader.readAsArrayBuffer(blob);
@@ -343,7 +343,7 @@ VideoFile.prototype.fetch = function fetch(startpos, recycle) {
     var length;
 
     do {
-        length = REQUEST_SIZE;
+        length = this.fetchChunkSize || REQUEST_SIZE;
 
         // skip cached data
         while ((p = this.cachefind(pos)) >= 0) {
@@ -405,13 +405,9 @@ VideoFile.prototype.fetch = function fetch(startpos, recycle) {
     }
 
     this.fetcher(this.data, pos, pos + length)
-        .then(function(data) {
-            var buffer = data.buffer;
-
-            if (Array.isArray(data)) {
-                buffer = data[1];
-                data = data[0];
-            }
+        .then(function(chunk) {
+            var data = chunk.payload;
+            var buffer = chunk.buffer;
 
             if (self.mru === undefined) {
                 // destroyed while loading
@@ -441,7 +437,8 @@ VideoFile.prototype.fetch = function fetch(startpos, recycle) {
 
             self.feedPlayer();
         })
-        .catch(function(ev, data) {
+        .catch(function(ev) {
+            var data = self.data;
             var xhr = ev && ev.target || false;
 
             if (self.mru === undefined) {
@@ -487,6 +484,10 @@ VideoFile.prototype.fetch = function fetch(startpos, recycle) {
                     else {
                         self.backoff = Math.min(self.backoff << 1, 7e3);
                         setTimeout(retry, self.backoff);
+
+                        if (xhr.status === 403 && typeof self.data === 'object') {
+                            self.data = self.data._ticket || self.data;
+                        }
                     }
                 }
                 else {
@@ -569,7 +570,11 @@ function Streamer(data, video, options) {
     }
 
     if (d) {
-        window.strm = this;
+        if (!window.strm) {
+            window.strm = new WeakSet();
+        }
+        window.strm.add(this);
+        window.strm.last = this;
     }
 }
 
@@ -599,9 +604,17 @@ Streamer.prototype.init = function(data) {
     });
 
     if (this.goAudioStream) {
+        if (options.partial === undefined) {
+            options.partial = !localStorage.vsNoPartialAudio;
+        }
+        if (options.partial) {
+            var s = AudioStream.partialChunkSize;
+            self.file.fetchChunkSize = s;
+            self.file.readerChunkSize = s;
+        }
         self.stream = new AudioStream(self.file.fetch(0), self.video, options);
 
-        ['error', 'audio-buffer'].forEach(function(ev) {
+        ['error', 'audio-buffer', 'duration', 'activity', 'inactivity'].forEach(function(ev) {
             self.stream.on(ev, function(a) {
                 self.notify(ev, a);
             });
@@ -657,13 +670,6 @@ Streamer.prototype.initTypeGuess = function(data) {
     file.fetcher(data, 0, 16)
         .then(function(chunk) {
             var buffer = chunk.buffer;
-            delete chunk.buffer;
-
-            if (Array.isArray(chunk)) {
-                buffer = chunk[1];
-                chunk = chunk[0];
-            }
-
             var dv = new DataView(buffer);
             var long = dv.getUint32(0, false);
 
@@ -685,7 +691,7 @@ Streamer.prototype.initTypeGuess = function(data) {
             else if (dv.getUint32(8, false) === 0x57415645) {
                 self.options.type = 'Wave';
             }
-            init(typeof data === 'string' ? chunk : data);
+            init(typeof data === 'string' ? chunk.payload || chunk : data);
         })
         .catch(function(ex) {
             if (d) {
@@ -733,10 +739,16 @@ Streamer.prototype.destroy = function() {
             catch (ex) {}
 
             clone.removeAttribute('src');
+            clone.removeAttribute('style');
+            clone.removeAttribute('poster');
             clone.removeAttribute('autoplay');
             parent.removeChild(video);
             parent.appendChild(clone);
         }
+    }
+
+    if (d && window.strm) {
+        window.strm.delete(this);
     }
 
     delete this.evs;
@@ -767,6 +779,11 @@ Streamer.prototype.onPlayBackEvent = function(playing) {
             this.playbackTook = Date.now() - this.playbackTook;
         }
         this.playbackSeeking = false;
+
+        if (this.stream._sbQuotaError) {
+            this.stream._sbQuotaError = false;
+        }
+        delay.cancel('vs.force-track-pump');
 
         if (this.stalled) {
             this.stalled = false;
@@ -833,7 +850,7 @@ Streamer.prototype.handleEvent = function(ev) {
         /* fallthrought */
         case 'canplay':
             videoFile.canplay = true;
-            if (this.options.autoplay && !videoFile.playing) {
+            if (this.options.autoplay && !videoFile.playing && (!this.playbackEvent || !videoFile.paused)) {
                 this.play();
             }
             break;
@@ -841,6 +858,23 @@ Streamer.prototype.handleEvent = function(ev) {
         case 'ended':
             this._clearActivityTimer();
             this.stream.flushSourceBuffers(-1);
+            break;
+
+        case 'stalled':
+            if (!this.isOverQuota) {
+                if (videoFile.playing) {
+                    var stream = this.stream;
+                    if (stream.findTimeGAPs()) {
+                        stream._enqueueForcePump();
+                    }
+                }
+                else if (this.playbackSeeking) {
+                    if (d) {
+                        console.warn('Forcing pump while stalled on seeking...', this.video.currentTime, [this]);
+                    }
+                    this.stream._enqueueForcePump(Math.max(1, this.video.currentTime - 2));
+                }
+            }
             break;
 
         case 'timeupdate':
@@ -921,6 +955,9 @@ Streamer.prototype.play = function() {
 
         if (typeof Promise !== 'undefined' && promise instanceof Promise) {
             promise.then(function() {
+                if (!self.file) {
+                    return;
+                }
                 if (d) {
                     console.debug('Playing, current time: %s, duration: %s',
                         secondsToTime(self.currentTime),
@@ -1064,7 +1101,7 @@ Streamer.prototype.getImage = function(w, h) {
         var ab = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
         var i, len = i = ab.byteLength, bp = 0;
         while (i--) {
-            if (ab[i] < 10) {
+            if (ab[i] < 30) {
                 bp++;
             }
         }
@@ -1097,11 +1134,19 @@ Streamer.prototype.dim = function(srcWidth, srcHeight, maxWidth, maxHeight) {
 
 Streamer.getThumbnail = function(data) {
     return new Promise(function(resolve, reject) {
+        if (data.__getVTNPid) {
+            return reject(-5);
+        }
+        if (Object.isExtensible(data)) {
+            Object.defineProperty(data, '__getVTNPid', {value: Streamer.pid});
+        }
+
         var video = document.createElement('video');
         video.muted = true;
 
-        var step = -1;
-        var s = Streamer(data, video);
+        var step = -1, offset = -1;
+        var tid = 'vst.' + makeUUID();
+        var s = Streamer(data, video, {videoOnly: true});
         var _reject = function(e) {
             s.destroy();
             reject(e);
@@ -1110,13 +1155,38 @@ Streamer.getThumbnail = function(data) {
             resolve(ab);
             s.destroy();
         };
+        var _pump = function() {
+            delay(tid, _onstalled, 7e3);
+            s.play();
+        };
+        var _onstalled = function() {
+            var stream = s.stream;
+            if (stream) {
+                queueMicrotask(_pump);
+                if (offset < 1) {
+                    offset = Math.min((video.currentTime | 0) + 2, video.duration - 3) | 0;
+                }
+                offset += 2.3;
+                if (offset + 3 > video.duration) {
+                    return _reject(-7);
+                }
+                s.currentTime = offset;
+                stream._enqueueForcePump(offset);
+                return true;
+            }
+        };
+
+        s.on('progress', _pump);
+        s.on('stalled', _onstalled);
 
         s.on('playing', function() {
             if (!++step) {
+                queueMicrotask(_pump);
                 this.currentTime = 20 * (video.duration | 0) / 100;
                 return true;
             }
 
+            delay.cancel(tid);
             s.getImage().then(_resolve).catch(_reject);
         });
 
@@ -1282,6 +1352,10 @@ Object.defineProperty(Streamer.prototype, 'gotIntoBuffering', {
     get: function() {
         return this.stalled && this.hasStartedPlaying && this.currentTime < this.duration && !this.playbackSeeking;
     }
+});
+
+Object.defineProperty(Streamer, 'pid', {
+    value: Symbol((Date.now() * Math.random()).toString(26))
 });
 
 /**

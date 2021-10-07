@@ -217,6 +217,28 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
         chunk = chunk.replace(/ checked\(([^)]+)\) \| 0/g, ' $1 | 0');
         chunk = chunk.replace(/!noAssert/g, '0'); /* <- !!! */
         chunk = chunk.replace(/function (?:checked|assertSize|checkOffset|checkInt|checkIEEE754)/g, 'if(0)var _=$&');
+
+        // @todo upgrade buffer@5.2.1 -- Buffer.concat([uint8array, ...]) is passed through fromArrayLike() ?!
+        chunk = chunk.replace('fromArrayLike(value)', 'fromArrayView(value)')
+            .replace('buf = Buffer.from(buf)', `
+                    if (pos + buf.length > buffer.length) {
+                        if (!Buffer.isBuffer(buf)) {
+                            buf = Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength)
+                        }
+                        buf.copy(buffer, pos)
+                    }
+                    else {
+                        Uint8Array.prototype.set.call(buffer, buf, pos)
+                    }
+                    pos += buf.length;
+                    continue;
+                `) + `;function fromArrayView (a) {
+                  if (isInstance(a, Uint8Array)) {
+                    a = new Uint8Array(a)
+                    return fromArrayBuffer(a.buffer, a.byteOffset, a.byteLength)
+                  }
+                  return fromArrayLike(a)
+                }`;
     }
 
     // readable-stream includes core-util-is, but it's unused in the browser, dead code elimination
