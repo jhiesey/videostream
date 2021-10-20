@@ -861,9 +861,9 @@ Streamer.prototype.handleEvent = function(ev) {
             break;
 
         case 'stalled':
-            if (!this.isOverQuota) {
+            var stream = this.stream;
+            if (!this.isOverQuota && stream instanceof VideoStream) {
                 if (videoFile.playing) {
-                    var stream = this.stream;
                     if (stream.findTimeGAPs()) {
                         stream._enqueueForcePump();
                     }
@@ -872,7 +872,7 @@ Streamer.prototype.handleEvent = function(ev) {
                     if (d) {
                         console.warn('Forcing pump while stalled on seeking...', this.video.currentTime, [this]);
                     }
-                    this.stream._enqueueForcePump(Math.max(1, this.video.currentTime - 2));
+                    stream._enqueueForcePump(Math.max(1, this.video.currentTime - 2));
                 }
             }
             break;
@@ -1162,6 +1162,9 @@ Streamer.getThumbnail = function(data) {
         var _onstalled = function() {
             var stream = s.stream;
             if (stream) {
+                if (!(stream instanceof VideoStream)) {
+                    return _reject(-9);
+                }
                 queueMicrotask(_pump);
                 if (offset < 1) {
                     offset = Math.min((video.currentTime | 0) + 2, video.duration - 3) | 0;

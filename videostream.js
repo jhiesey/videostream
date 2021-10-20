@@ -362,19 +362,24 @@ VideoStream.prototype.destroy = function() {
 
     if (self._tracks) {
         var i, track, tracks = self._tracks;
-
-        for (i = tracks.length; i--;) {
-            track = tracks[i];
-
+        var destroy = function(track, instance) {
             try {
-                if (track.muxed) {
-                    track.muxed.destroy();
+                if (track[instance]) {
+                    track[instance].destroy();
                 }
             }
             catch (ex) {
-                console.warn(track, ex);
+                console.warn(track, instance, ex);
             }
+        };
+
+        for (i = tracks.length; i--;) {
+            track = tracks[i];
+            destroy(track, 'mediaSource');
+            destroy(track, 'muxed');
         }
+
+        self._tracks = false;
     }
 
     if (String(self._elem.src).startsWith('blob:')) {
@@ -389,11 +394,12 @@ VideoStream.prototype.destroy = function() {
 
 VideoStream.prototype.forEachSourceBuffer = function(cb) {
     if (this._tracks) {
-        var i, currentTime = this._elem.currentTime, sb, startRange, endRange, ms;
+        var i, currentTime = this._elem.currentTime, sb, startRange, endRange, ms, src;
 
         for (i = this._tracks.length; i--;) {
-            ms = this._tracks[i].mediaSource._mediaSource;
-            sb = this._tracks[i].mediaSource._sourceBuffer;
+            src = this._tracks[i].mediaSource || false;
+            ms = src._mediaSource;
+            sb = src._sourceBuffer;
 
             try {
                 startRange = sb.buffered.length ? sb.buffered.start(0) : 0;
@@ -445,11 +451,14 @@ VideoStream.prototype._forcePump = function(offset) {
     delay.cancel('vs.force-track-pump');
 
     if (this._tracks) {
-        var t = this._tracks;
-        for (var i = t.length; i--;) {
-            var ms = t[i].mediaSource;
-            var sb = ms._sourceBuffer;
+        var t = this._tracks, i, ms, sb;
+        for (i = t.length; i--;) {
+            ms = t[i].mediaSource;
+            sb = ms && ms._sourceBuffer;
 
+            if (!sb || !ms) {
+                continue;
+            }
             ++step;
             ms._cb = null;
             ms.destroy();
@@ -528,13 +537,14 @@ VideoStream.prototype.findTimeGAPs = function() {
 
 VideoStream.prototype.forEachBufferedRanges = function(cb) {
     if (this._tracks) {
-        var trackId, j, currentTime = this._elem.currentTime, sb, startRange, endRange, ms;
+        var trackId, j, currentTime = this._elem.currentTime, sb, startRange, endRange, ms, src;
 
         for (trackId = this._tracks.length; trackId--;) {
-            ms = this._tracks[trackId].mediaSource._mediaSource;
-            sb = this._tracks[trackId].mediaSource._sourceBuffer;
+            src = this._tracks[trackId].mediaSource || false;
+            ms = src._mediaSource;
+            sb = src._sourceBuffer;
 
-            for (j = sb.buffered.length; j--;) {
+            for (j = sb && sb.buffered.length; j--;) {
                 try {
                     endRange = sb.buffered.end(j);
                     startRange = sb.buffered.start(j);
