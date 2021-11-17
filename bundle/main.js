@@ -156,6 +156,21 @@ function VideoFile(data, streamer) {
         }
         this.fetcher = this.fileReader;
     }
+    else {
+        var o = streamer.options || {};
+
+        if (o.filesize > 0) {
+            this.filesize = o.filesize;
+
+            if (o.bitrate > this.fetchChunkSize) {
+                this.fetchChunkSize = ((o.bitrate + 0x1000000) & -0x1000000);
+
+                if (d) {
+                    console.debug('chunk-size set to %s', this.fetchChunkSize);
+                }
+            }
+        }
+    }
 
     window.addEventListener('online', this);
 }
@@ -852,6 +867,13 @@ Streamer.prototype.handleEvent = function(ev) {
             videoFile.canplay = true;
             if (this.options.autoplay && !videoFile.playing && (!this.playbackEvent || !videoFile.paused)) {
                 this.play();
+            }
+            if (videoFile.fetchChunkSize > REQUEST_SIZE) {
+                videoFile.fetchChunkSize = REQUEST_SIZE;
+
+                if (d) {
+                    console.debug('chunk-size reset to %s', videoFile.fetchChunkSize);
+                }
             }
             break;
 
