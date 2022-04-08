@@ -225,8 +225,8 @@ ns.bcp47match = function(lang) {
         return lang;
     }
 
-    var locales = [navigator.language, mega.intl.locale];
-    for (var i = locales.length; i--;) {
+    var locales = ['nn-' + mega.ipcc, mega.intl.locale, navigator.language].concat(navigator.languages);
+    for (var i = 0; i < locales.length; ++i) {
         var locale = String(locales[i]).split('-');
         if (locale[1] && String(locale[1]).toLowerCase() === lang) {
             // lang as per user country

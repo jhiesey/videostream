@@ -110,9 +110,16 @@ function AudioStream(file, mediaElem, opts) {
     mediaElem.addEventListener('error', self._onError);
 
     if (context.state === 'suspended') {
-        onIdle(function() {
-            context.resume();
-        });
+        self._resume();
+    }
+
+    if (window.safari || ua.details.engine === 'Webkit') {
+        self._onVisibilityChange = function() {
+            if (context.state === 'suspended' || context.state === 'interrupted') {
+                self._resume();
+            }
+        };
+        window.addEventListener('visibilitychange', context.onstatechange = self._onVisibilityChange);
     }
 }
 
@@ -136,6 +143,10 @@ AudioStream.prototype.destroy = function(err) {
         self.destroyed = true;
         self._buffer = null;
         self._fileStream.destroy();
+
+        if (self._onVisibilityChange) {
+            window.removeEventListener('visibilitychange', self._onVisibilityChange);
+        }
 
         elm.removeEventListener('play', self._onPlay);
         elm.removeEventListener('pause', self._onPause);
@@ -342,6 +353,15 @@ AudioStream.prototype._play = function(time) {
     }
     this._stop();
 
+    if (context.state === 'interrupted') {
+        context.resume()
+            .then(function() {
+                self._play(time);
+            })
+            .catch(dump);
+        return;
+    }
+
     source.buffer = audioBuffer;
     source.connect(self._audioAnalyser);
     source.connect(self._audioStream);
@@ -361,6 +381,13 @@ AudioStream.prototype._play = function(time) {
     f.playing = true;
     self.emit('activity');
 };
+
+AudioStream.prototype._resume = SoonFc(40, function() {
+    var self = this;
+    var context = self._audioContext;
+
+    Promise.resolve(context.resume()).catch(dump);
+});
 
 AudioStream.prototype._captureStream = function(canvas) {
     var stream;

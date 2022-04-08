@@ -812,6 +812,31 @@ Streamer.prototype.onPlayBackEvent = function(playing) {
     }
 };
 
+Streamer.prototype.canSwitchAudioTrack = tryCatch(function(error) {
+    var stream = this.stream || false;
+    var muxer = stream._muxer || false;
+    if (stream instanceof VideoStream && muxer._chosenAudioTrack >= 0) {
+        if (!this.options.bat) {
+            this.options.bat = Object.create(null);
+        }
+        this.options.bat[muxer._chosenAudioTrack] = 1;
+
+        if (d && error) {
+            console.info('Stream error, attempting to switch to another audio track...', error, this.options);
+        }
+
+        var self = this;
+        tryCatch(function() {
+            self.stream.destroy();
+        })();
+
+        this.stream = new VideoStream(this.file, this.video, this.options);
+        return true;
+    }
+
+    return false;
+});
+
 Streamer.prototype.handleEvent = function(ev) {
     var target = ev.target;
     var videoFile = this.file;
@@ -947,6 +972,10 @@ Streamer.prototype.handleEvent = function(ev) {
             }
             if (streamError) {
                 console.warn('StreamError', streamError);
+            }
+
+            if (this.canSwitchAudioTrack(error || -13)) {
+                return;
             }
         }
         this.notify(ev, error || false);

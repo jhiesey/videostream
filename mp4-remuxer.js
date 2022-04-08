@@ -20,6 +20,7 @@ function MP4Remuxer (file, opts) {
 	self._file = file
 	self._decoder = null
 	self._videoOnly = opts && opts.videoOnly;
+	self._bogusAudioTracks = opts && opts.bat || Object.create(null);
 	self._findMoov(0)
 }
 
@@ -210,7 +211,7 @@ MP4Remuxer.prototype._processTracks = function(traks) {
                 self._hasVideo = {type: stsd.type, codec: codec, mime: mime, trak: trak, lang: lang, idx: i};
             }
         }
-        else if (type === 'soun' && !self._videoOnly) {
+        else if (type === 'soun' && !self._videoOnly && !self._bogusAudioTracks[i]) {
             codec = stsd.type;
 
             if (stsd.type === 'mp4a') {
@@ -298,6 +299,7 @@ MP4Remuxer.prototype._processMoov = function (moov) {
         }
         else if (self._hasAudio && self._hasAudio.trak === trak) {
             mime = self._hasAudio.mime;
+            self._chosenAudioTrack = self._hasAudio.idx;
             self._hasAudio = self._hasAudio.codec;
         }
         else {
