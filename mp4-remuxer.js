@@ -54,7 +54,6 @@ class MP4Remuxer extends EventEmitter {
       }
     }
     this._decoder.on('box', boxHandler)
-
   }
 
   _processMoov (moov) {
@@ -309,11 +308,10 @@ class MP4Remuxer extends EventEmitter {
     })
 
     if (startOffset >= 0) {
-      const fileStream = this._fileStream = this._file.createReadStream({
-        start: startOffset
-      })
-
       this._tracks.forEach(track => {
+        const fileStream = this._fileStream = this._file.createReadStream({
+          start: startOffset
+        })
         track.inStream = new RangeSliceStream(startOffset, {
           // Allow up to a 10MB offset between audio and video,
           // which should be fine for any reasonable interleaving
