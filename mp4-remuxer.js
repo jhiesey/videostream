@@ -259,7 +259,7 @@ MP4Remuxer.prototype._processTracks = function(traks) {
         }
     }
 
-    self._hasAudio = def || eng || und;
+    self._hasAudio = def || eng || und || false;
 };
 
 MP4Remuxer.prototype._processMoov = function (moov) {
@@ -280,7 +280,7 @@ MP4Remuxer.prototype._processMoov = function (moov) {
 	self._hasAudio = false
 	self._processTracks(traks);
 	if (d) {
-		console.debug('video%s:%s, audio%s:%s', self._hasVideo.idx, self._hasVideo.codec, self._hasAudio.idx, self._hasAudio.codec);
+		console.debug('video%s:%s, audio%s:%s', self._hasVideo.idx, self._hasVideo.codec, self._hasAudio.idx | 0, self._hasAudio.codec || 'N/A');
 	}
 
 	for (var i = 0; i < traks.length; i++) {

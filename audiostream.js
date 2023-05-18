@@ -40,6 +40,7 @@ function AudioStream(file, mediaElem, opts) {
     self._videoContext = null;
     self._audioContext = context;
     self._audioAnalyser = null;
+    self._isWebkitSafari = window.safari || ua.details.engine === 'Webkit';
 
     var fileStream = file.createReadStream({start: 0});
     self._fileStream = fileStream;
@@ -62,6 +63,12 @@ function AudioStream(file, mediaElem, opts) {
         }
         else {
             self._buffer = data;
+        }
+
+        if (self._isWebkitSafari && !AudioStream.patched) {
+            AudioStream.patched = true;
+            log('patching decode-audio-data if needed...');
+            require('promise-decode-audio-data');
         }
 
         if (opts.partial) {
@@ -113,7 +120,7 @@ function AudioStream(file, mediaElem, opts) {
         self._resume();
     }
 
-    if (window.safari || ua.details.engine === 'Webkit') {
+    if (self._isWebkitSafari) {
         self._onVisibilityChange = function() {
             if (context.state === 'suspended' || context.state === 'interrupted') {
                 self._resume();
@@ -339,6 +346,20 @@ AudioStream.prototype._stop = function() {
 };
 
 AudioStream.prototype._play = function(time) {
+    try {
+        return this.__tryPlay(time);
+    }
+    catch(ex) {
+        try {
+            this.destroy(ex);
+        }
+        catch(ex) {
+            this.emit('error', ex);
+        }
+    }
+};
+
+AudioStream.prototype.__tryPlay = function(time) {
     var self = this;
     var context = self._audioContext;
     var visualiser = self._visualiser;
@@ -490,10 +511,12 @@ function AudioVisualiser(stream, fftSize) {
 
     window.addEventListener('focus', self._onFocus = function() {
         self._hasFocus = true;
+        self._start();
     });
 
     window.addEventListener('blur', self._onBlur = function() {
         self._hasFocus = false;
+        self._stop();
     });
 }
 
@@ -544,6 +567,16 @@ AudioVisualiser.prototype._draw = function() {
     self._byteData = new Uint8Array(analyser.frequencyBinCount);
     self._barWidth = Math.max(4, (canvas.width / self._byteData.byteLength) * 8);
 
+    self._stop = function() {
+        if (tick === this._tick++) {
+            this._byteData = false;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (stream.requestFrame) {
+                stream.requestFrame();
+            }
+        }
+    };
+
     (function _draw() {
         if (tick === self._tick) {
             self.draw(ctx, canvas.width, canvas.height);
@@ -551,12 +584,7 @@ AudioVisualiser.prototype._draw = function() {
             if (stream.requestFrame) {
                 stream.requestFrame();
 
-                if (self._hasFocus) {
-                    setTimeout(_draw, 60);
-                }
-                else {
-                    later(_draw);
-                }
+                requestIdleCallback(_draw);
             }
             else {
                 requestAnimationFrame(_draw);
@@ -714,8 +742,3 @@ Star.prototype.drawStar = function() {
         this.angle = Math.atan(Math.abs(this.y) / Math.abs(this.x));
     }
 };
-
-
-onIdle(function() {
-    require('promise-decode-audio-data');
-});

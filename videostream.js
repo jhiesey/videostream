@@ -535,7 +535,7 @@ VideoStream.prototype.findTimeGAPs = function() {
     return res;
 };
 
-VideoStream.prototype.forEachBufferedRanges = function(cb) {
+VideoStream.prototype.forEachBufferedRanges = tryCatch(function(cb) {
     if (this._tracks) {
         var trackId, j, currentTime = this._elem.currentTime, sb, startRange, endRange, ms, src;
 
@@ -557,7 +557,7 @@ VideoStream.prototype.forEachBufferedRanges = function(cb) {
             }
         }
     }
-};
+});
 
 // Flush source buffers when seeking backward or forward
 VideoStream.prototype._flushSourceBuffers = function(mode, track) {

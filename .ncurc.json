@@ -1,0 +1,11 @@
+{
+    "peer": true,
+    "cache": true,
+    "format": "ownerChanged, time",
+    "reject": [
+        "ebml",
+        "uglify-js",
+        "mp4-stream",
+        "readable-stream"
+    ]
+}
