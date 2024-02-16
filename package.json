@@ -1,6 +1,6 @@
 {
   "name": "videostream",
-  "version": "5.4.1",
+  "version": "5.5.0",
   "description": "Streams data from a file-like seekable object into a `video` or `audio` node (a HTMLMediaElement)",
   "main": "videostream.js",
   "private": true,
@@ -27,12 +27,12 @@
     "mp4-stream": "3.0.0",
     "promise-decode-audio-data": "^0.4.1",
     "pump": "^3.0.0",
-    "range-slice-stream": "^2.0.0",
+    "range-slice-stream": "^3.0.0",
     "readable-stream": "3.6.2"
   },
   "devDependencies": {
-    "@babel/core": "^7.21.8",
-    "@babel/preset-env": "^7.21.5",
+    "@babel/core": "^7.23.9",
+    "@babel/preset-env": "^7.23.9",
     "browserify": "^17.0.0",
     "uglify-js": "3.10.4"
   }

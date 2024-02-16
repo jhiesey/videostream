@@ -541,7 +541,6 @@ function Streamer(data, video, options) {
         return new Streamer(data, video, options);
     }
     this.gecko = uad.engine === 'Gecko';
-    this.msie = "ActiveXObject" in window || window.MSBlobBuilder;
     this.options = options || Object.create(null);
     if (this.options.autoplay === undefined) {
         this.options.autoplay = true;
@@ -549,7 +548,7 @@ function Streamer(data, video, options) {
 
     this._events = [
         'progress', 'timeupdate', 'canplay', 'pause', 'playing', 'error',
-        'abort', 'updateend', 'ended', 'stalled', 'suspend'
+        'abort', 'updateend', 'ended', 'stalled', 'suspend', 'durationchange'
     ];
     if (video.parentNode && this.gecko && parseInt(uad.version) < 57) {
         this.sbflush = true;
@@ -803,11 +802,6 @@ Streamer.prototype.onPlayBackEvent = function(playing) {
         if (this.stalled) {
             this.stalled = false;
             this.notify('activity');
-
-            // XXX: on MSIE the video continues stalled while audio does play, seeking back fixes it..
-            if (this.msie) {
-                // this.video.currentTime = this.video.currentTime - .2;
-            }
         }
     }
 };
@@ -872,6 +866,12 @@ Streamer.prototype.handleEvent = function(ev) {
             this._clearActivityTimer();
             break;
 
+        case 'durationchange':
+            if (this.duration > 0) {
+                this.notify('duration', this.duration);
+            }
+            break;
+
         case 'progress':
             target.removeEventListener('progress', this);
 
@@ -904,7 +904,9 @@ Streamer.prototype.handleEvent = function(ev) {
 
         case 'ended':
             this._clearActivityTimer();
-            this.stream.flushSourceBuffers(-1);
+            if (this.stream instanceof VideoStream) {
+                this.stream.flushSourceBuffers(-1);
+            }
             break;
 
         case 'stalled':
@@ -1264,6 +1266,52 @@ Streamer.prototype.getProperty = function(key) {
     return false;
 };
 
+Object.defineProperty(Streamer.prototype, 'ended', {
+    get: function() {
+        var stream = this.stream;
+        var video = this.video || false;
+        return video.ended || stream instanceof AudioStream && this.currentTime + 0.01 >= this.duration;
+    }
+});
+
+Object.defineProperty(Streamer.prototype, 'paused', {
+    get: function() {
+        var video = this.video || false;
+        return video.paused;
+    }
+});
+
+Object.defineProperty(Streamer.prototype, 'interrupted', {
+    get: function() {
+        return this.paused || this.ended;
+    }
+});
+
+Object.defineProperty(Streamer.prototype, 'playing', {
+    get: function() {
+        return this.hasStartedPlaying && !this.interrupted;
+    }
+});
+
+Object.defineProperty(Streamer.prototype, 'playbackRate', {
+    get: function() {
+        var video = this.video;
+        var stream = this.stream;
+        return stream instanceof AudioStream ? stream.playbackRate : video && video.playbackRate;
+    },
+    set: function(v) {
+        var video = this.video;
+        var stream = this.stream;
+
+        if (stream instanceof AudioStream) {
+            stream.playbackRate = v;
+        }
+        else if (video) {
+            video.playbackRate = v;
+        }
+    }
+});
+
 Object.defineProperty(Streamer.prototype, 'gain', {
     set: function(v) {
         var stream = this.stream;
@@ -1314,7 +1362,7 @@ Object.defineProperty(Streamer.prototype, 'muted', {
 Object.defineProperty(Streamer.prototype, 'duration', {
     get: function() {
         var video = this.video || false;
-        return video.duration - this.presentationOffset;
+        return video.duration !== Infinity && video.duration - this.presentationOffset;
     }
 });
 
@@ -1341,13 +1389,6 @@ Object.defineProperty(Streamer.prototype, 'currentTime', {
         else if (video.readyState) {
             var time = v + self.presentationOffset;
             video.currentTime = time;
-
-            // Attempt to deal with https://developer.microsoft.com/en-us/microsoft-edge/platform/issues/11459883
-            // I.e. The 'waiting' event may not actually be timely fired so we'll manually pump the track...
-            if (self.msie) {
-                stream._pump(time);
-            }
-
             self.play();
         }
         else if (d) {

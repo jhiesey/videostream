@@ -23,9 +23,10 @@ function AudioStream(file, mediaElem, opts) {
     self._file = file;
     self._decTick = 0;
     self._buffer = null;
+    self._ended = false;
     self._bytesRead = 0;
     self._playOffset = 0;
-    self._pauseOffset = 0;
+    self._timeOffset = 0;
     self._hasAudio = true;
     self._decoding = false;
     self._complete = false;
@@ -98,18 +99,14 @@ function AudioStream(file, mediaElem, opts) {
     };
     self._onPause = function() {
         if (self._audioStream) {
-            var offset = context.currentTime - self._playOffset;
             self._stop();
-            self._pauseOffset = offset;
-            // log('onpause', offset);
         }
     };
     self._onPlay = function() {
         // log('onplay', self._pauseOffset);
 
-        if (self._audioStream && self._pauseOffset) {
-            var audioBuffer = self._audioBuffer || false;
-            self._play(self._pauseOffset >= audioBuffer.duration ? 0 : self._pauseOffset);
+        if (self._audioStream) {
+            self._play(self._ended ? 0 : self._timeOffset);
         }
     };
     mediaElem.addEventListener('play', self._onPlay);
@@ -317,7 +314,6 @@ AudioStream.prototype._setup = function(autoplay, time, buffer) {
 
     if (!autoplay) {
         self._onPause();
-        self._pauseOffset += .001;
     }
 
     elm.srcObject = new MediaStream(tracks);
@@ -328,6 +324,8 @@ AudioStream.prototype._stop = function() {
     var self = this;
     var audioSource = self._audioSource;
     var visualiser = self._visualiser;
+    var ctx = self._audioContext;
+    var pos = self.currentTime;
 
     if (audioSource) {
         try {
@@ -341,8 +339,8 @@ AudioStream.prototype._stop = function() {
         visualiser._stop();
     }
 
-    self._playOffset = 0;
-    self._pauseOffset = 0;
+    self._timeOffset = pos;
+    self._playOffset = ctx.currentTime;
 };
 
 AudioStream.prototype._play = function(time) {
@@ -361,10 +359,10 @@ AudioStream.prototype._play = function(time) {
 
 AudioStream.prototype.__tryPlay = function(time) {
     var self = this;
+    var rate = self.playbackRate;
     var context = self._audioContext;
     var visualiser = self._visualiser;
     var audioBuffer = self._audioBuffer;
-    var source = context.createBufferSource();
 
     // log('play', time, audioSource, context);
 
@@ -383,15 +381,17 @@ AudioStream.prototype.__tryPlay = function(time) {
         return;
     }
 
+    var source = context.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(self._audioAnalyser);
     source.connect(self._audioStream);
     source.start(0, time);
-    source.playbackRate.setValueAtTime(1, time);
+    source.playbackRate.value = rate;
 
     self._audioSource = source;
-    self._playOffset = self._audioContext.currentTime - time;
-    self._pauseOffset = 0;
+    self._playOffset = context.currentTime;
+    self._timeOffset = time;
+    self._ended = false;
 
     if (visualiser) {
         visualiser._start();
@@ -408,6 +408,25 @@ AudioStream.prototype._resume = SoonFc(40, function() {
     var context = self._audioContext;
 
     Promise.resolve(context.resume()).catch(dump);
+});
+
+AudioStream.prototype._endOfStream = tryCatch(function() {
+    if (!this._ended) {
+        var v = this._elem;
+        var dsp = function() {
+            v.removeEventListener('pause', dsp);
+            v.dispatchEvent(new Event('ended'));
+        };
+        this._ended = true;
+
+        if (v.paused) {
+            dsp()
+        }
+        else {
+            v.addEventListener('pause', dsp);
+            v.pause();
+        }
+    }
 });
 
 AudioStream.prototype._captureStream = function(canvas) {
@@ -445,26 +464,35 @@ Object.defineProperty(AudioStream.prototype, '_bufTime', {
     }
 });
 
+Object.defineProperty(AudioStream.prototype, 'playbackRate', {
+    get: function() {
+        var s = this._audioSource;
+        return s && s.playbackRate && s.playbackRate.value || 1.0;
+    },
+    set: function(v) {
+        var s = this._audioSource;
+        if (s && s.playbackRate) {
+            var t = this.currentTime;
+            s.playbackRate.value = v;
+            this._play(t);
+        }
+    }
+});
+
 Object.defineProperty(AudioStream.prototype, 'currentTime', {
     get: function() {
         var self = this;
         var audioBuffer = self._audioBuffer || false;
-
-        if (self._pauseOffset) {
-            return self._pauseOffset;
-        }
-
         var context = self._audioContext;
-        var result = 0;
+        var result = this._timeOffset + ((context.currentTime - self._playOffset) * self.playbackRate);
 
-        if (self._playOffset) {
-            result = context.currentTime - self._playOffset;
-        }
         // log('currentTime', result, context.currentTime, self._playOffset);
 
         if (result >= audioBuffer.duration) {
+            result = audioBuffer.duration;
+
             if (self.ready) {
-                self._elem.pause();
+                self._endOfStream();
             }
             else {
                 self._onPause();

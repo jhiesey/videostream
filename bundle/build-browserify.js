@@ -239,6 +239,13 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
                   }
                   return fromArrayLike(a)
                 }`;
+
+        // nuke some unused functions
+        chunk = chunk.replace(
+            /^Buffer\.prototype\.(compare|includes|indexOf|lastIndexOf|inspect|equals)\s*=/gm,
+            'if(0)$&'
+        );
+        chunk = chunk.replace(/^function\s+(bidirectionalIndexOf|arrayIndexOf)/gm, 'if(0)self.x=$&');
     }
 
     // readable-stream includes core-util-is, but it's unused in the browser, dead code elimination
@@ -370,6 +377,14 @@ Megaify.prototype._transform = function(chunk, enc, cb) {
     if (this.filename.indexOf('/ebml/schema.js') > 0) {
         chunk = chunk.replace(/^\s+"(?:description|cppname)":\s*".*",?$/mg, '');
         beautify = false;
+    }
+    else if (this.filename.indexOf('/ebml/tools.js') > 0) {
+        // https://github.com/node-ebml/node-ebml/compare/v2.2.3...v3.0.0
+        chunk = chunk.replace('for (var length = 1; length <= 8',
+            'var length = 8 - Math.floor(Math.log2(buffer[start]));if(0)$&');
+    }
+    else if (this.filename.indexOf('/ebml/decoder.js') > 0) {
+        chunk = chunk.replace(/buffer\.slice/g, 'buffer.subarray');
     }
     else if (this.filename.indexOf('/bundle/locale.js') > 0) {
         beautify = false;

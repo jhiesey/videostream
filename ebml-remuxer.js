@@ -10,6 +10,7 @@ module.exports = EBMLRemuxer;
 
 var DEBUG = localStorage.vsd | 0;
 var DEBUG_INFO = DEBUG || window.d;
+var DEBUG_ALL = DEBUG > 3;
 var DEBUG_TRACE = DEBUG > 2;
 var DEBUG_VERBOSE = DEBUG > 1;
 
@@ -265,9 +266,11 @@ function EBMLReader(file, offset) {
     this._conGroup = 0;
     this._cluster = null;
     this._ebmlOffset = 0;
+    this._lastBlock = null;
     this._clusterCount = 0;
     this._segmentOffset = 0;
     this._timecodes = [0, 0];
+    this._clusterOffset = -1;
     this._byteOffset = offset;
     this._trackDefaultDuration = 0;
     this._segment = Object.create(null);
@@ -338,8 +341,21 @@ EBMLReader.prototype._emitCluster = function(duration) {
 };
 
 EBMLReader.prototype._onFinish = function() {
+    var v = -1;
+    var s = this._clusterOffset;
+    if (s > 0) {
+        var b = this._lastBlock;
+        var d = b.data;
+        var dur = (d.readUInt32BE(0) / 1e6) | 0;
+        var t = this._timecodes[this._clusterCount & 1] + dur;
+
+        this._addTimeCode(t);
+
+        v = -dur;
+        this._cluster = this._read(s, b.end);
+    }
     if (this._cluster !== null) {
-        this._emitCluster(-1);
+        this._emitCluster(v);
     }
     this.emit('cluster', null);
     this.destroy();
@@ -409,6 +425,13 @@ EBMLReader.prototype._onData = function(state, data) {
                 }
                 /**/
 
+                var x = segment;
+                if (x.Segment) {
+                    console.warn('left over segment', x.Segment);
+                    Object.assign(x, x.Segment);
+                    delete x.Segment;
+                }
+
                 this.emit('segment', segment);
                 return;
             }
@@ -435,18 +458,30 @@ EBMLReader.prototype._onData = function(state, data) {
         this._segment = tmp;
     }
     else if (state === 'end') {
+        var name = data.name.toLowerCase();
+        var C = name === 'cluster';
+        var E = C && data.end === -1;
+
         tmp = this._segment;
         this._segment = tmp.$;
         delete tmp.$;
 
-        if (data.end - data.start > 0) {
-            var name = data.name.toLowerCase();
+        if (data.end - data.start > 0 || E) {
 
             if (this.listenerCount(name)) {
-                var chunk = this._read(data.start, data.end);
+                var chunk = !E && this._read(data.start, data.end);
 
-                if (name === 'cluster') {
-                    this._cluster = chunk;
+                if (C) {
+                    if (E) {
+                        var s = this._clusterOffset;
+                        if (s >= 0) {
+                            this._cluster = this._read(s, data.start);
+                        }
+                        this._clusterOffset = data.start;
+                    }
+                    else {
+                        this._cluster = chunk;
+                    }
                 }
                 else {
                     if (name === 'cues') {
@@ -463,20 +498,29 @@ EBMLReader.prototype._onData = function(state, data) {
         }
     }
     else {
-        this._segment[data.name] = this._getValue(data);
+        if (data.name === 'SimpleBlock' || data.name === 'Block') {
+            this._lastBlock = data;
+        }
+        else {
+            this._segment[data.name] = this._getValue(data);
+        }
 
         if (data.name === 'Timecode') {
-            var h = ++this._clusterCount & 1;
-
-            this._timecodes[h] = this._getValue(data);
-
-            if (this._cluster !== null) {
-                this._emitCluster(this._timecodes[h] - this._timecodes[~h & 1]);
-            }
+            this._addTimeCode(this._getValue(data));
         }
         else if (data.name === 'DefaultDuration') {
             this._trackDefaultDuration = data;
         }
+    }
+};
+
+EBMLReader.prototype._addTimeCode = function(v) {
+    var h = ++this._clusterCount & 1;
+
+    this._timecodes[h] = v;
+
+    if (this._cluster !== null) {
+        this._emitCluster(this._timecodes[h] - this._timecodes[~h & 1]);
     }
 };
 
@@ -535,6 +579,7 @@ function MediaSegment(muxer, offset) {
     this.$etup();
 
     var s = muxer._initSegment;
+    this.segment = s;
     this.playtime = s.playtime;
     this.timescale = s.timescale;
     this.seektime = muxer._seekTime;
@@ -575,6 +620,9 @@ MediaSegment.prototype.append = function(cluster, timecode, duration) {
     // this.hexdump(cluster);
 
     if (duration < 0) {
+        if (!this.playtime) {
+            this.playtime = (timecode + -duration) * this.timescale;
+        }
         duration = this.playtime / this.timescale - timecode;
 
         if (DEBUG_INFO) {
@@ -588,12 +636,14 @@ MediaSegment.prototype.append = function(cluster, timecode, duration) {
     if (cs === 0x1000000) {
         timecodeOffset = 12;
     }
-    else if ((cs >> 24) === 0xFF) {
-        timecodeOffset = 5;
-    }
-    else if (DEBUG_TRACE) {
-        console.warn('Unexpected cluster data size...');
-        this.hexdump(cluster);
+    else {
+        if (cs === 0x1FFFFFF || !this.segment.playtime) {
+           if (DEBUG_INFO) {
+                console.warn('non-seekable cluster, 0x%s', cluster.toString('hex', 0, 32));
+            }
+            this.push(this.segment.data);
+        }
+        timecodeOffset = (12 - Math.floor(Math.log2(cs >>> 24))) | 0;
     }
 
     if (timecodeOffset > 0) {
@@ -602,6 +652,7 @@ MediaSegment.prototype.append = function(cluster, timecode, duration) {
             if (DEBUG_INFO) {
                 console.debug(this + ' mkv timecode fixup (0x%s)', cluster.toString('hex', 0, timecodeOffset+9));
             }
+            // skip crc-32 value
             cs = cluster.readUInt16BE(timecodeOffset += 6);
         }
         if ((cs >> 8) === 0xE7 && (cs & 0xff) > 0x7F) {
@@ -624,6 +675,10 @@ MediaSegment.prototype.append = function(cluster, timecode, duration) {
             console.warn('Unexpected timecode offset...');
         }
     }
+    else if (DEBUG_INFO) {
+        console.warn('Unexpected cluster data size...');
+        this.hexdump(cluster);
+    }
 
     this.push(cluster);
 };
@@ -642,7 +697,9 @@ function createStream(dest, source, destroy) {
         if (DEBUG_VERBOSE) {
             var _emit = this.emit;
             this.emit = function(event) {
-                console.warn(this + '.emit(%s)', event, arguments, [this]);
+                if (event !== 'data' || DEBUG_ALL) {
+                    console.warn(this + '.emit(%s)', event, arguments, [this]);
+                }
                 return _emit.apply(this, arguments);
             };
         }
@@ -681,19 +738,6 @@ function createStream(dest, source, destroy) {
     dest.prototype.toString = function() {
         return this.constructor.name + '[$' + this.$iid + ']';
     };
-}
-
-// @private
-function tryCatch(cb) {
-    cb.$trycatcher = function() {
-        try {
-            return cb.apply(this, arguments);
-        }
-        catch (ex) {
-            console.warn('Unexpected caught exception.', ex);
-        }
-    };
-    return cb.$trycatcher;
 }
 
 // @private
