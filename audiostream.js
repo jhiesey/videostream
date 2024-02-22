@@ -28,6 +28,7 @@ function AudioStream(file, mediaElem, opts) {
     self._playOffset = 0;
     self._timeOffset = 0;
     self._hasAudio = true;
+    self._stopping = false;
     self._decoding = false;
     self._complete = false;
     self._elem = mediaElem;
@@ -322,6 +323,11 @@ AudioStream.prototype._setup = function(autoplay, time, buffer) {
 
 AudioStream.prototype._stop = function() {
     var self = this;
+    if (self._stopping) {
+        return;
+    }
+    self._stopping = true;
+
     var audioSource = self._audioSource;
     var visualiser = self._visualiser;
     var ctx = self._audioContext;
@@ -341,6 +347,7 @@ AudioStream.prototype._stop = function() {
 
     self._timeOffset = pos;
     self._playOffset = ctx.currentTime;
+    self._stopping = false;
 };
 
 AudioStream.prototype._play = function(time) {
@@ -489,12 +496,12 @@ Object.defineProperty(AudioStream.prototype, 'currentTime', {
         // log('currentTime', result, context.currentTime, self._playOffset);
 
         if (result >= audioBuffer.duration) {
-            result = audioBuffer.duration;
 
             if (self.ready) {
                 self._endOfStream();
+                result = audioBuffer.duration;
             }
-            else {
+            else if (!self._stopping) {
                 self._onPause();
                 self.emit('inactivity');
                 var f = self._file;

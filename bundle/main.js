@@ -1065,7 +1065,7 @@ Streamer.prototype.on = function(ev, success, error) {
 Streamer.prototype.notify = function(ev) {
     var type = String(typeof ev === 'object' && ev.type || ev);
 
-    if (this.evs[type]) {
+    if (this.evs && this.evs[type]) {
         var args = new Array(arguments.length);
         for (var i = args.length; i--;) {
             args[i] = arguments[i];
@@ -1270,7 +1270,7 @@ Object.defineProperty(Streamer.prototype, 'ended', {
     get: function() {
         var stream = this.stream;
         var video = this.video || false;
-        return video.ended || stream instanceof AudioStream && this.currentTime + 0.01 >= this.duration;
+        return video.ended || stream instanceof AudioStream && stream._ended;
     }
 });
 

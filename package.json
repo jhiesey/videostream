@@ -1,6 +1,6 @@
 {
   "name": "videostream",
-  "version": "5.5.0",
+  "version": "5.5.1",
   "description": "Streams data from a file-like seekable object into a `video` or `audio` node (a HTMLMediaElement)",
   "main": "videostream.js",
   "private": true,
